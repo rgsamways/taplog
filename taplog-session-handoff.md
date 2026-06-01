@@ -1,5 +1,5 @@
 # TapLog — Session Handoff
-> Session date: 2026-05-31
+> Session date: 2026-06-01
 > Prepared for: next Claude session
 
 ---
@@ -8,126 +8,119 @@
 
 1. Upload all md docs: `taplog-spec.md`, `taplog-curriculum.md`, `taplog-investor-summary.md`, `taplog-lightbulbs.md`, `taplog-md-prime-directives.md`, `taplog-pilot-tester-pool.md`, `taplog-session-handoff.md`
 2. Read `taplog-md-prime-directives.md` first and confirm you've read it
-3. Next module is **Module 31 — Visual Asset Identification**
-4. Start with `/opsx:propose "module-31-visual-asset-identification"` in Claude Code
+3. **Before anything else:** complete backend tasks 9.1–9.4 in `C:\dev\taplog-api` (see below)
+4. Next Android module is **Module 35 — Anchor Config** (backend-only, zero Android changes) OR back to **Module 31 — Visual Asset Identification**
 
 ---
 
 ## What was accomplished this session
 
-Session 9 was the most productive build session to date. Three modules archived in a single session.
+Session 10 was an architectural pivot session. Module 34 (vertical engine) was prioritized over Modules 31–33 because the vertical engine is the foundational layer that all future verticals and multi-role flows depend on. The Android app is now a vertical factory.
 
-### Module 27 — Tamper-evident scan log + tag lifecycle (COMPLETE, verified on device)
-
-**What was built:**
-- `ScanEvent` entity — insert-only, every NFC tap logged (BROWSE or INSPECTION), assetId FK, inspectorId (nullable until Module 28), isSynced
-- `TagEvent` entity — insert-only, tag attach/retire lifecycle, retiredReason enum, retiredByInspectorId (nullable until Module 28), isSynced
-- Room version 3 → 4 (`MIGRATION_3_4` — creates scan_events and tag_events tables)
-- `ScanEventDao`, `TagEventDao` — insert + query only, no update/delete methods
-- Tag replacement workflow — `ReplaceTagDialog` on AssetDetailScreen, `AwaitingReplacementTag` ScanState, atomic `withTransaction`
-- `checklistItems: List<String>` added to `OFCAssetType` — all 35 types populated against CAN/ULC-S536:19
-- Pre-inspection checklist card on `InspectionFormScreen` — displayed before form, fully offline
-- Collapsible scan history section on `AssetDetailScreen`
-- Two new backend endpoints: POST /api/v1/scan_events, POST /api/v1/tag_events
-- Sync order: assets → tag_events → inspections → deficiencies → scan_events
-- Back navigation audit: `BackHandler` on all screens, `imePadding()` fixed on OrganisationSetupScreen + SiteRegistrationScreen
-- MIGRATION_2_3 retroactively patched to include `isSynced` on all three tables (was missing)
-
-### Module 28 — Authenticated inspector identity (COMPLETE, verified on device)
+### Module 34 — Vertical Engine (COMPLETE on Android, backend pending)
 
 **What was built:**
 
-*Backend:*
-- `app/auth.py` — JWT (python-jose), password hashing via direct bcrypt (passlib removed — Python 3.13 incompatible with bcrypt 4.x), Resend email dispatch with dev console fallback
-- `app/routers/auth.py` — 6 endpoints: register, verify-email, login, register-device, refresh, resend-code
-- `app/routers/organisations.py` + `sites.py` — Bearer-auth upsert endpoints; organisations router back-links inspector's organisationId on first org sync
-- `app/dependencies.py` — `get_current_inspector` JWT Bearer dependency
-- All 5 existing sync routers swapped from x-api-key to Depends(get_current_inspector)
-- New MongoDB collections: `inspectors` (unique index on cert_number), `devices`, `pending_verifications` (TTL index on expires_at)
-- JWT_SECRET and RESEND_API_KEY added to Railway env vars
+*Architecture:*
+- `VerticalModels.kt` — full data model: `TriggerModel`, `RoleModel`, `FieldType`, `FormField`, `InspectionFormProfile`, `VerticalAssetType`, `VerticalConfig`, `VerticalRegistry` singleton
+- `ResultOption` + `ResultAction` enum — replace `List<String>` for result options; downstream actions (REMOVE_FROM_SERVICE, NOTIFY_AUTHORITY, ISSUE_CERTIFICATE, DELIVER_REPORT) encoded in the config, not hardcoded
+- `TriggerConfig` replaces `intervalMonths: Int?` — supports CALENDAR (months), MILEAGE, ENGINE_HOURS; `TriggerModel` gains `MILEAGE` and `ENGINE_HOURS` values
+- `EmberVerticalConfig.build()` — translates all `OFCCategory` / `OFCAssetType` entries to `VerticalAssetType` instances; used as cold-start static fallback
 
-*Android:*
-- `InspectorPreferences.kt` stripped to: authToken, refreshToken, inspectorId, deviceId. Added `decodeJwtClaims()` (base64, no library), `ensureDeviceId()`, `InspectorClaims` data class
-- `AuthApiService.kt` — 6 auth endpoints + request/response models
-- `AuthInterceptor.kt` — runBlocking token read, Bearer injection, 401 → refresh → retry → clearAuth
-- `RetrofitClient.kt` — dual clients: authApiService (no interceptor) + createSyncApiService(AuthInterceptor)
-- `ui/auth/` package — AuthViewModel + LoginScreen + RegistrationScreen + EmailVerificationScreen + NewDeviceScreen
-- `InspectionFormScreen` — replaced editable name/cert fields with read-only `InspectorIdentityCard` from JWT claims
-- `EmberViewModel` — `inspectorClaims: StateFlow<InspectorClaims?>` from JWT, `inspectorId` on ScanEvent/TagEvent
-- `MainActivity` — auth gate at startup, `AuthFlow` composable
-- `SyncRepository` — org/site sync added, sync order: organisations → sites → assets → tag_events → inspections → deficiencies → scan_events
-- `TapLogApplication.onCreate()` — calls `scheduleSyncIfNeeded(this)` — was missing, causing sync to never fire
-- `TapLogVertical` enum added to EmberModels: EMBER, ANCHOR, HATCH, NEWEL, MAST, CRANE, SEAM, SPAN
-- `Asset.vertical: TapLogVertical = TapLogVertical.EMBER` field added — Room version 5 → 6, MIGRATION_5_6
-- Room version 4 → 5 (MIGRATION_4_5: organisations.isSynced)
+*Room:*
+- Version 6 → 7 (`MIGRATION_6_7`): adds `vertical_configs` table (JSON blob cache)
+- Version 7 → 8 (`MIGRATION_7_8`): adds `organisations.licensedVerticals` TEXT column
+- `VerticalConfigEntity` + `VerticalConfigDao` (upsert + getAll)
 
-**Bugs fixed during session:**
-- passlib incompatible with Python 3.13 + bcrypt 4.x — fixed by removing passlib, using bcrypt directly
-- Resend silent failure — RESEND_API_KEY set but taplog.ca domain unverified → using onboarding@resend.dev temporarily; added Resend error logging
-- Sync never firing — TapLogApplication had no onCreate(), sync trigger was missing post-auth rewrite
+*Startup:*
+- `TapLogApplication.initVerticalRegistry()` — fetch from `GET /api/v1/verticals` → upsert to Room → register in VerticalRegistry; offline fallback to Room cache; cold-start fallback to `EmberVerticalConfig.build()`
+- `SplashScreen` now accepts `registryReady: Boolean` — tap-to-continue disabled until registry is populated
+- `verticalRegistryReady: StateFlow<Boolean>` exposed from `TapLogApplication`
 
-### Module 29 — PDF inspection reports (COMPLETE, verified on device)
+*InspectionFormScreen refactor:*
+- All `OFCCategory`, `OFCAssetType`, `OFCAssetTypes` imports removed
+- Checklist sourced from `VerticalRegistry.get(asset.vertical).assetTypeRegistry.find { it.code == asset.assetType }?.checklistItems`
+- Result selector iterates `formProfile.resultOptions` (List<ResultOption>); displays `option.label`; maps `option.code` back to `InspectionResult.valueOf()` on submit
+- Dynamic fields loop over `formProfile.fields`, rendering by `FieldType` (TEXT, NUMBER, BOOLEAN; others as text fallback)
+- Deficiencies section conditional on `formProfile.deficienciesEnabled`
 
-**What was built:**
-- `PdfReportGenerator.kt` — PdfDocument canvas renderer, A4, zero dependencies; sections: org/site/client → asset (OFC label) → inspection (coloured result) → deficiencies (numbered, severity-coloured, max 10 with "…and N more") → next due date
-- `ReportRepository.kt` — generates PDF to getExternalFilesDir()/TapLog/, returns FileProvider content URI
-- `res/xml/file_paths.xml` — FileProvider path config
-- `AndroidManifest.xml` — FileProvider registered at ca.taplog.app.fileprovider
-- `DeficiencyDao.getByInspection()` — new query
-- `EmberViewModel.shareReport()` + `shareReportEvent: SharedFlow<Intent>`
-- "Share Report" TextButton on each InspectionHistoryCard
-- `MainActivity` LaunchedEffect collecting shareReportEvent → Intent.createChooser
+*Routing:*
+- `EntryEventScreen.kt` — stub composable, "Multi-role entry form — coming soon" + back button
+- `MainActivity` Inspecting state: checks `VerticalRegistry.get(asset.vertical).roleModel`; routes `MULTI_ROLE` → `EntryEventScreen`, `SINGLE_INSPECTOR` → `InspectionFormScreen`
+
+*Organisation:*
+- `Organisation.licensedVerticals: List<String> = listOf("EMBER")` added
+- `List<String>` TypeConverter added to `Converters.kt`
+- `OrganisationSyncRequest` and `toSyncRequest()` updated to include `licensedVerticals`
+
+*API:*
+- `TapLogApiService` gains `getVerticals()` and `getVertical(code)` GET endpoints
+
+*OpenSpec:*
+- Module 34 archived to `openspec/changes/archive/2026-06-01-module-34-vertical-engine/`
+- 4 specs synced to `openspec/specs/`: `vertical-config` (new), `vertical-form-engine` (new), `ofc-checklists` (updated), `org-site-sync` (updated)
+- `openspec/design-docs/inspection-cardinality.md` — open design doc stub; blocks Fleet, Hatch multi-asset sessions, Anchor batch pre-use
+
+---
+
+## Backend tasks required before Module 35 or any vertical config testing
+
+These 4 tasks must be completed in `C:\dev\taplog-api` before the vertical engine is operational:
+
+1. Add `licensed_verticals: List[str] = ["EMBER"]` to the Organisation Pydantic model; include in Organisation API response
+2. Create `verticals` MongoDB collection; seed with Ember `VerticalConfig` JSON document (full asset type registry + form profile with `ResultOption` + `TriggerConfig` structures)
+3. Implement `GET /api/v1/verticals` — returns configs filtered by `org.licensed_verticals`; requires Bearer auth
+4. Implement `GET /api/v1/verticals/{code}` — returns single config or 404; requires Bearer auth
+
+Until these are deployed, the app falls back to `EmberVerticalConfig.build()` (static Kotlin data) on every cold start. The Ember path is fully functional regardless.
 
 ---
 
 ## Current state of the app
 
-**Everything working on device (Pixel 10 Pro XL, API 36):**
-- Full v1 loop verified: register → email code → verify → org setup → site creation → NFC scan → asset registration → inspection → PDF report → share sheet
-- Auth gate at startup — token present skips auth flow
-- ScanEvent logged on every NFC tap with inspectorId from JWT
-- TagEvent on asset registration; tag replacement workflow functional
-- Pre-inspection checklists on all 35 OFC types
-- PDF reports generated on-device, shared via Android share sheet
-- Full sync pipeline: organisations → sites → assets → tag_events → inspections → deficiencies → scan_events
-- MongoDB Atlas receiving all entities with Bearer auth
+**Android (Room v8, build passing):**
+- Vertical engine implemented; Ember path fully field-driven via `VerticalConfig`
+- `OFCAssetTypes.kt` retained as static fallback — not deleted
+- `InspectionFormScreen` has zero OFC imports; identical behaviour for Ember
+- `EntryEventScreen` stub in place for MULTI_ROLE routing
+- Cold-start fallback chain working: backend fetch → Room cache → static Ember config
+
+**Backend (pending):**
+- Tasks 9.1–9.4 (see above) not yet implemented
+- All existing sync endpoints unchanged and working
+- Ember inspection flow end-to-end unaffected
 
 **Not yet built:**
-- Visual Asset Identification (Module 31) — photo → AI suggests OFC asset type; depends on Module 30 ✅
-- Inspection guidance Level 2 (Module 32)
-- AI co-pilot (Module 33)
+- Module 31 — Visual Asset Identification (deferred; Module 34 prioritized)
+- Module 32 — Inspection guidance Level 2 (deferred)
+- Module 33 — AI inspection co-pilot (deferred)
+- Module 35 — Anchor config in backend (backend-only; zero Android changes)
+- Module 36 — Hatch config + EntryEventScreen implementation
+- Inspection cardinality (open design doc — blocks Fleet/Hatch multi-asset)
 - Billing (before OAFC November 2026)
 
 ---
 
-## Next module
+## Next module options
 
-**Module 31 — Visual Asset Identification**
+**Option A — Complete the vertical engine (recommended first):**
+Complete backend tasks 9.1–9.4 in taplog-api, then `/opsx:propose "module-35-anchor-config"`. Module 35 is backend-only: add Anchor `VerticalConfig` document to MongoDB. Zero Android changes.
 
-Inspector photographs an asset; AI suggests the OFC asset type. Depends on Module 30 photo capture infrastructure (complete).
-
-Key design decisions to work through at propose time:
-- Which AI API: Claude claude-haiku-4-5 (fast, cheap, multimodal) via Anthropic API
-- Input: JPEG photo from camera + prompt asking for OFC type classification
-- Output: ranked list of OFC type suggestions (code + label + confidence)
-- Where it appears: `AssetRegistrationScreen` — after photo is taken, suggestions appear below the asset type picker
-- Offline behaviour: photo saved locally; AI call is online-only; graceful fallback to manual picker if offline
-- `BuildConfig.ANTHROPIC_API_KEY` sourced from `local.properties`
-
-Start with: `/opsx:propose "module-31-visual-asset-identification"` in Claude Code
+**Option B — Resume AI features:**
+Go back to `/opsx:propose "module-31-visual-asset-identification"`. Vertical engine is fully backward-compatible; Module 31 can proceed without the backend tasks being done.
 
 ---
 
 ## Key technical context
 
-- **Stack:** Kotlin 2.3.21 · Compose · Room 2.8.4 (version 6) · KSP 2.3.9 · AGP 9.2.1 · DataStore 1.1.1
+- **Stack:** Kotlin 2.3.21 · Compose · Room 2.8.4 (version **8**) · KSP 2.3.9 · AGP 9.2.1 · DataStore 1.1.1
 - **Backend:** FastAPI + Motor + MongoDB Atlas, live at https://web-production-a9fb1.up.railway.app
 - **Backend Python:** 3.13 · bcrypt direct (no passlib) · python-jose · httpx
 - **Dev device:** Pixel 10 Pro XL (API 36)
 - **Android Studio:** Panda 4 | 2025.3.4 Patch 1, Windows
 - **Repos:** C:\dev\taplog (Android), C:\dev\taplog-api (backend)
 - **Package:** ca.taplog.app
-- **Room DB:** version 6, `taplog_ember.db`
+- **Room DB:** version **8**, `taplog_ember.db`
 - **MongoDB:** farpost-dev Atlas M0 cluster, `taplog` database
 
 ## Critical workflow notes
@@ -136,8 +129,10 @@ Start with: `/opsx:propose "module-31-visual-asset-identification"` in Claude Co
 - **End of session:** update all md docs → generate handoff → `copy taplog-md-prime-directives.md .claude\AGENTS.md`
 - **OpenSpec per module:** `/opsx:propose` → review → `/opsx:apply` → `/opsx:archive`
 - **Room migration crashes during dev:** clear app storage (Settings → Apps → TapLog → Storage → Clear storage)
-- **Resend email:** using `onboarding@resend.dev` as sender. Verification codes arrive in real email. Switch to `noreply@taplog.ca` once domain is verified in Resend dashboard.
-- **Sync not firing?** Check Background Task Inspector in Android Studio. `ExistingWorkPolicy.KEEP` means airplane mode trick only works if no work is currently enqueued.
+- **Resend email:** using `onboarding@resend.dev` as sender. Switch to `noreply@taplog.ca` once domain verified in Resend dashboard.
+- **VerticalRegistry must be populated before any screen that calls `VerticalRegistry.get()`** — SplashScreen gates on `registryReady` StateFlow
+- **`OFCAssetTypes.kt` is intentionally retained** — it is the cold-start fallback for Ember. Do not delete until backend vertical config is proven in production.
+- **Room v8** — two separate migrations: 6→7 (vertical_configs table), 7→8 (organisations.licensedVerticals column)
 - **`AssetDetailSource`** lives in `ca.taplog.app.data` — import from there, not `ui.ember`
 - **`material-icons-extended`** required for `Icons.AutoMirrored.*` and `Icons.Default.*`
-- **InspectorPreferences.kt** is physically in `ui/ember/` directory but declares `package ca.taplog.app.data` — don't move it, just import from the data package
+- **InspectorPreferences.kt** is physically in `ui/ember/` directory but declares `package ca.taplog.app.data` — don't move it

@@ -1,5 +1,5 @@
 # TapLog — Project Spec
-> Last updated: 2026-05-31
+> Last updated: 2026-06-01
 
 ## Overview
 Offline-first NFC/RFID asset inspection platform for regulated trades.
@@ -49,27 +49,31 @@ Offline-first NFC/RFID asset inspection platform for regulated trades.
 ```
 ca.taplog.app
 ├── data/
-│   ├── EmberModels.kt       — Organisation, Site, Asset, Inspection, Deficiency, DeficiencyWithAsset,
+│   ├── EmberModels.kt       — Organisation (+ licensedVerticals), Site, Asset, Inspection, Deficiency,
 │   │                          ScanEvent, TagEvent entities + all enums (incl. TapLogVertical, RetireReason)
-│   ├── Converters.kt        — Room TypeConverters for all enums (incl. TapLogVertical)
+│   ├── VerticalModels.kt    — TriggerModel, RoleModel, FieldType, ResultAction, ResultOption,
+│   │                          TriggerConfig, FormField, InspectionFormProfile, VerticalAssetType,
+│   │                          VerticalConfig, VerticalRegistry singleton
+│   ├── Converters.kt        — Room TypeConverters for all enums + List<String> + VerticalConfig (Gson)
 │   ├── EmberDAO.kt          — OrganisationDao, SiteDao, AssetDao, InspectionDao, DeficiencyDao,
 │   │                          ScanEventDao, TagEventDao
-│   ├── AppDatabase.kt       — Room singleton, version 6, taplog_ember.db
-│   │                          Migrations: 2→3, 3→4, 4→5, 5→6
+│   ├── VerticalConfigDao.kt — VerticalConfigEntity (Room entity) + VerticalConfigDao (upsert + getAll)
+│   ├── AppDatabase.kt       — Room singleton, version 8, taplog_ember.db
+│   │                          Migrations: 2→3, 3→4, 4→5, 5→6, 6→7, 7→8
 │   ├── EmberRepository.kt   — Thin data access layer for ViewModels
+│   ├── EmberVerticalConfig.kt — EmberVerticalConfig.build() — translates OFCCategory to VerticalConfig;
+│   │                            static cold-start fallback; NOT deleted until backend cache proven
 │   ├── InspectorPreferences.kt — DataStore: authToken, refreshToken, inspectorId, deviceId ONLY
 │   │                             + InspectorClaims data class + decodeJwtClaims()
 │   │                             (lives in ui/ember/ directory but package ca.taplog.app.data)
-│   ├── OFCAssetTypes.kt     — OFCCategory enum + OFCAssetType (code, label, description,
-│   │                          intervalMonths, checklistItems — all 35 types populated vs CAN/ULC-S536:19)
+│   ├── OFCAssetTypes.kt     — OFCCategory enum + OFCAssetType (35 types, checklistItems populated)
+│   │                          RETAINED as static fallback — do not delete until VerticalConfig cache proven
 │   ├── SyncModels.kt        — Wire-format request/response models + toSyncRequest() extensions
-│   │                          Includes: OrganisationSyncRequest, SiteSyncRequest, AssetSyncRequest,
-│   │                          TagEventSyncRequest, InspectionSyncRequest, DeficiencySyncRequest,
-│   │                          ScanEventSyncRequest
+│   │                          OrganisationSyncRequest now includes licensedVerticals
 │   ├── SyncResult.kt        — Sealed class: Success / Conflict / Failure
 │   ├── RetrofitClient.kt    — Dual Retrofit clients: authApiService (no interceptor) +
 │   │                          createSyncApiService(AuthInterceptor) (Bearer injected)
-│   ├── TapLogApiService.kt  — Retrofit interface: all sync endpoints (no auth header — injected)
+│   ├── TapLogApiService.kt  — Retrofit interface: getVerticals(), getVertical(code) + all sync endpoints
 │   ├── AuthApiService.kt    — Retrofit interface: register, verify-email, login, register-device,
 │   │                          refresh, resend-code + all request/response models
 │   ├── AuthInterceptor.kt   — OkHttp interceptor: injects Bearer token, handles 401 → refresh →
@@ -100,19 +104,27 @@ ca.taplog.app
 │   │   │                                "Share Report" per inspection + "Replace Tag" button
 │   │   ├── AssetListScreen.kt         — Browse all assets, overdue highlighting
 │   │   ├── AssetTypePickerDialog.kt   — Two-step OFC picker: search + category chips + type list
-│   │   ├── InspectionFormScreen.kt    — Checklist card + InspectorIdentityCard (read-only) +
-│   │   │                                result picker + deficiency dialog
+│   │   ├── InspectionFormScreen.kt    — Field-driven via VerticalConfig: checklist card +
+│   │   │                                InspectorIdentityCard + ResultOption result selector +
+│   │   │                                FormField loop + conditional deficiencies section
+│   │   │                                NO OFCCategory/OFCAssetType imports
+│   │   ├── EntryEventScreen.kt        — Stub: "Multi-role entry form — coming soon" + back button
+│   │   │                                Shown for MULTI_ROLE vertical assets (Hatch prep)
 │   │   ├── OpenDeficienciesScreen.kt  — All unresolved deficiencies, mark resolved
-│   │   └── SplashScreen.kt            — Fade in/out on launch
+│   │   └── SplashScreen.kt            — Accepts registryReady: Boolean — tap disabled until
+│   │                                    VerticalRegistry is populated
 │   └── theme/
 │       ├── Color.kt
 │       ├── Theme.kt
 │       └── Type.kt
-├── MainActivity.kt          — NFC foreground dispatch, auth gate (token check at startup),
-│                              AuthFlow composable, EmberScanScreen, all state routing
+├── MainActivity.kt          — NFC foreground dispatch, auth gate, AuthFlow composable,
+│                              EmberScanScreen, Inspecting state routes MULTI_ROLE → EntryEventScreen
+│                              or SINGLE_INSPECTOR → InspectionFormScreen
 ├── TapLogApplication.kt     — App singleton: database, repository, inspectorPreferences,
 │                              authInterceptor, syncApiService, syncRepository, reportRepository,
-│                              authViewModelFactory. onCreate() calls scheduleSyncIfNeeded()
+│                              authViewModelFactory. onCreate(): scheduleSyncIfNeeded() +
+│                              initVerticalRegistry() (fetch → cache → static fallback chain)
+│                              verticalRegistryReady: StateFlow<Boolean> exposed for SplashScreen
 ├── SyncWorker.kt            — WorkManager CoroutineWorker, calls syncAll(), retry on failure
 └── ConnectivityReceiver.kt  — BroadcastReceiver, triggers scheduleSyncIfNeeded on restore
 ```
@@ -138,7 +150,9 @@ taplog-api/
 │       ├── inspections.py  — POST /api/v1/inspections (Bearer auth, asset existence guard)
 │       ├── deficiencies.py — POST /api/v1/deficiencies (Bearer auth, inspection existence guard)
 │       ├── scan_events.py  — POST /api/v1/scan_events (Bearer auth, upsert)
-│       └── tag_events.py   — POST /api/v1/tag_events (Bearer auth, upsert)
+│       ├── tag_events.py   — POST /api/v1/tag_events (Bearer auth, upsert)
+│       └── verticals.py    — GET /api/v1/verticals, GET /api/v1/verticals/{code}
+│                             (PENDING — Module 34 backend tasks 9.1–9.4)
 ├── .env                 — MONGODB_URL, DB_NAME=taplog, API_KEY, JWT_SECRET, RESEND_API_KEY
 ├── .gitignore
 ├── Procfile             — web: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -163,32 +177,14 @@ data class Organisation(
     val province: String = "ON",
     val subscriptionTier: SubscriptionTier = SubscriptionTier.SOLO,
     val subscriptionStatus: SubscriptionStatus = SubscriptionStatus.TRIAL,
+    val licensedVerticals: List<String> = listOf("EMBER"),  // MIGRATION_7_8
     val isSynced: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 ```
 
-### Site
-```kotlin
-@Entity(tableName = "sites", foreignKeys = [...], indices = [Index("organisationId")])
-data class Site(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val organisationId: String,
-    val name: String,
-    val address: String,
-    val city: String,
-    val province: String = "ON",
-    val postalCode: String? = null,
-    val clientName: String? = null,
-    val clientPhone: String? = null,
-    val contactName: String? = null,
-    val contactPhone: String? = null,
-    val notes: String? = null,
-    val isActive: Boolean = true,
-    val isSynced: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
-)
-```
+### Site, Asset, Inspection, Deficiency, ScanEvent, TagEvent
+*(unchanged from previous spec — see below)*
 
 ### Asset
 ```kotlin
@@ -205,95 +201,70 @@ data class Asset(
     val nextInspectionDue: Long? = null,
     val isActive: Boolean = true,
     val isSynced: Boolean = false,
-    val vertical: TapLogVertical = TapLogVertical.EMBER,  // MIGRATION_5_6
+    val vertical: TapLogVertical = TapLogVertical.EMBER,
     val createdAt: Long = System.currentTimeMillis()
 )
 ```
 
-### Inspection
+### VerticalConfigEntity (Room cache — Module 34)
 ```kotlin
-@Entity(tableName = "inspections", foreignKeys = [...], indices = [Index("assetId")])
-data class Inspection(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val assetId: String,
-    val inspectorName: String,           // from JWT claims (Module 28+)
-    val inspectorCertNumber: String,     // from JWT claims (Module 28+)
-    val inspectedAt: Long = System.currentTimeMillis(),
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val result: InspectionResult,
-    val notes: String? = null,
-    val isSynced: Boolean = false
+@Entity(tableName = "vertical_configs")
+data class VerticalConfigEntity(
+    @PrimaryKey val verticalCode: String,
+    val configJson: String               // full VerticalConfig serialized as JSON
 )
 ```
 
-### Deficiency
+### VerticalConfig (Module 34)
 ```kotlin
-@Entity(tableName = "deficiencies", foreignKeys = [...], indices = [Index("inspectionId")])
-data class Deficiency(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val inspectionId: String,
-    val assetId: String,
-    val code: String,
-    val description: String,
-    val severity: DeficiencySeverity,
-    val photoPath: String? = null,       // populated in Module 30
-    val resolvedAt: Long? = null,
-    val isSynced: Boolean = false
+data class VerticalConfig(
+    val vertical: TapLogVertical,
+    val displayName: String,
+    val shortName: String,
+    val regulatoryFramework: String,
+    val triggerModel: TriggerModel,
+    val roleModel: RoleModel,
+    val formProfile: InspectionFormProfile,
+    val assetTypeRegistry: List<VerticalAssetType>
 )
-```
 
-### ScanEvent (Module 27)
-```kotlin
-@Entity(tableName = "scan_events", foreignKeys = [...], indices = [Index("assetId")])
-data class ScanEvent(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val tagId: String,
-    val assetId: String,                 // FK to Asset
-    val inspectorId: String? = null,     // populated from JWT post Module 28
-    val inspectorName: String,
-    val scannedAt: Long = System.currentTimeMillis(),
-    val eventType: ScanEventType,        // INSPECTION / BROWSE
-    val isSynced: Boolean = false
+data class InspectionFormProfile(
+    val resultOptions: List<ResultOption>,  // was List<String> — now carries ResultAction
+    val fields: List<FormField>,
+    val requiresPermit: Boolean = false,
+    val requiresWitness: Boolean = false,
+    val deficienciesEnabled: Boolean = true,
+    val photoRequired: Boolean = false
 )
-```
 
-### TagEvent (Module 27)
-```kotlin
-@Entity(tableName = "tag_events", foreignKeys = [...], indices = [Index("assetId")])
-data class TagEvent(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val assetId: String,
-    val tagId: String,
-    val attachedAt: Long,
-    val retiredAt: Long? = null,
-    val retiredReason: RetireReason? = null,
-    val retiredByInspectorId: String? = null,  // from JWT post Module 28
-    val isSynced: Boolean = false
+data class ResultOption(
+    val code: String,       // e.g. "PASS", "REMOVE_FROM_SERVICE"
+    val label: String,      // display label e.g. "Pass", "Remove from service"
+    val action: ResultAction
 )
-```
 
-**Key design principle:** `Asset.nfcTagId` is a current pointer to the active tag — not permanent identity. The asset is the permanent record. Tags are replaceable pointers. All inspections and scan events attach to `assetId`, never `tagId` directly.
-
-### OFCAssetType
-```kotlin
-data class OFCAssetType(
+data class VerticalAssetType(
     val code: String,
     val label: String,
-    val inspectionIntervalMonths: Int,
     val description: String,
-    val checklistItems: List<String> = emptyList()
+    val triggerConfig: TriggerConfig,   // replaces intervalMonths: Int?
+    val checklistItems: List<String>,
+    val defaultFormFields: List<String> = emptyList()
 )
-```
 
-### InspectorClaims (not a Room entity — decoded from JWT)
-```kotlin
-data class InspectorClaims(
-    val inspectorId: String,
-    val name: String,
-    val email: String,
-    val certNumber: String,
-    val organisationId: String
+data class TriggerConfig(
+    val type: TriggerModel,
+    val intervalMonths: Int? = null,
+    val intervalMiles: Int? = null,
+    val intervalHours: Int? = null
+)
+
+data class FormField(
+    val key: String,
+    val label: String,
+    val type: FieldType,
+    val required: Boolean,
+    val applicableAssetTypes: List<String> = emptyList()
 )
 ```
 
@@ -307,6 +278,23 @@ enum class SubscriptionStatus { TRIAL, ACTIVE, PAST_DUE, CANCELLED }
 enum class ScanEventType { INSPECTION, BROWSE }
 enum class RetireReason { DAMAGED, LOST, REPLACED, REMOVED }
 enum class TapLogVertical { EMBER, ANCHOR, HATCH, NEWEL, MAST, CRANE, SEAM, SPAN }
+enum class TriggerModel { CALENDAR, PRE_USE, ENTRY_EVENT, ON_DEMAND, MILEAGE, ENGINE_HOURS }
+enum class RoleModel { SINGLE_INSPECTOR, MULTI_ROLE }
+enum class FieldType { TEXT, NUMBER, BOOLEAN, SINGLE_SELECT, MULTI_SELECT, DATE, PHOTO }
+enum class ResultAction { NONE, REMOVE_FROM_SERVICE, NOTIFY_AUTHORITY, ISSUE_CERTIFICATE, DELIVER_REPORT }
+```
+
+**Key design principle:** `Asset.nfcTagId` is a current pointer to the active tag — not permanent identity. The asset is the permanent record. Tags are replaceable pointers. All inspections and scan events attach to `assetId`, never `tagId` directly.
+
+### InspectorClaims (not a Room entity — decoded from JWT)
+```kotlin
+data class InspectorClaims(
+    val inspectorId: String,
+    val name: String,
+    val email: String,
+    val certNumber: String,
+    val organisationId: String
+)
 ```
 
 ---
@@ -320,6 +308,34 @@ enum class TapLogVertical { EMBER, ANCHOR, HATCH, NEWEL, MAST, CRANE, SEAM, SPAN
 | 4 | MIGRATION_3_4: scan_events, tag_events tables added |
 | 5 | MIGRATION_4_5: organisations.isSynced added (was missing from v3 SQL) |
 | 6 | MIGRATION_5_6: assets.vertical TEXT NOT NULL DEFAULT 'EMBER' added |
+| 7 | MIGRATION_6_7: vertical_configs table added (verticalCode PK, configJson TEXT) |
+| 8 | MIGRATION_7_8: organisations.licensedVerticals TEXT NOT NULL DEFAULT '["EMBER"]' added |
+
+---
+
+## Vertical Engine Architecture (Module 34)
+
+### VerticalRegistry
+- Singleton object in `VerticalModels.kt`
+- `register(config: VerticalConfig)` — called at startup
+- `get(vertical: TapLogVertical): VerticalConfig` — throws `IllegalStateException` if vertical not registered
+- `all(): List<VerticalConfig>`, `isRegistered()`, `count()`
+
+### Startup fallback chain (`TapLogApplication.initVerticalRegistry()`)
+1. Fetch `GET /api/v1/verticals` → upsert to Room → register each config
+2. If fetch fails: load from `VerticalConfigDao.getAll()` → register from cache
+3. If cache empty: `VerticalRegistry.register(EmberVerticalConfig.build())` — static Kotlin fallback
+4. Set `_verticalRegistryReady.value = true` — unblocks SplashScreen
+
+### InspectionFormScreen routing
+- `SINGLE_INSPECTOR` roleModel → `InspectionFormScreen` (field-driven, no OFC imports)
+- `MULTI_ROLE` roleModel → `EntryEventScreen` (stub in this module)
+
+### Ember VerticalConfig (`EmberVerticalConfig.build()`)
+- `resultOptions`: PASS / REQUIRES_ATTENTION / FAIL, all with `ResultAction.NONE`
+- `fields`: single TEXT field (key="notes", label="Notes", required=false)
+- `deficienciesEnabled = true`, `photoRequired = false`
+- `assetTypeRegistry`: all OFCCategory types mapped to VerticalAssetType with `TriggerConfig(CALENDAR, intervalMonths)`
 
 ---
 
@@ -361,22 +377,6 @@ pending_verifications
 | `POST /api/v1/auth/refresh` | Decode refresh token, issue new access token |
 | `POST /api/v1/auth/resend-code` | Re-send verification code for EMAIL_VERIFY or NEW_DEVICE |
 
-### Auth Flow Rules
-- Cert number is unique at registration — backend rejects duplicate (409)
-- Device ID: UUID generated once at app install, stored permanently in DataStore, never rotated
-- New device on login → 403 + detail "NEW_DEVICE" → email code sent → `register-device` → JWT
-- All sync endpoints require `Authorization: Bearer <token>`
-- `AuthInterceptor` injects token on every request, handles 401 → refresh → retry once → clearAuth()
-- No backward compatibility required — pilot user has no existing data
-- `passlib` removed — direct `bcrypt` (Python 3.13 compat fix)
-- Email sender: `onboarding@resend.dev` (temporary) → `noreply@taplog.ca` once domain verified in Resend
-
-### Security Properties
-- Knowing name + cert number is insufficient — requires password
-- Knowing password is insufficient on unregistered device — requires email access
-- Every inspection signed by verified inspector identity + device ID
-- `inspectorId` populated on ScanEvent and TagEvent.retiredByInspectorId post Module 28
-
 ---
 
 ## ViewModel — ScanState
@@ -387,10 +387,10 @@ sealed class ScanState {
     data class SiteSelected(val site: Site) : ScanState()
     object AssetList : ScanState()
     object OpenDeficiencies : ScanState()
-    object Idle : ScanState()                               // routes to SiteRegistrationScreen
+    object Idle : ScanState()
     object Scanning : ScanState()
     data class AssetFound(val asset: Asset) : ScanState()
-    data class Inspecting(val asset: Asset) : ScanState()
+    data class Inspecting(val asset: Asset) : ScanState()  // routed by roleModel
     data class AwaitingReplacementTag(val asset: Asset, val reason: RetireReason) : ScanState()
     object AssetNotFound : ScanState()
     data class Error(val message: String) : ScanState()
@@ -399,55 +399,28 @@ sealed class ScanState {
 
 ---
 
-## Auth Gate — First Launch Flow (post Module 28)
-1. Splash screen fades in/out
-2. `LaunchedEffect` reads `inspectorPreferences.getAuthToken()` — suspending DataStore read
-3. Token absent → `AuthFlow` composable → Login/Registration/Verification screens
-4. Token present → `LaunchedEffect` calls `viewModel.loadOrganisation()`
-5. `loadOrganisation()` checks organisationDao — null → `OrganisationSetup`, else → `SiteList`
-6. `TapLogApplication.onCreate()` calls `scheduleSyncIfNeeded(this)` — sync triggered on every launch
-
----
-
-## NFC Flow
-1. Inspector selects a site → NFC tap available
-2. NFC tap → `onNfcTagScanned(tagId)` → validates site context (error if no site selected)
-3. DB lookup by `nfcTagId`
-4. ScanEvent logged immediately (BROWSE) — insert-only
-5. **Found** → `AssetFound` → AssetDetailScreen → Start Inspection → InspectionFormScreen
-6. **Not found** → `AssetNotFound` → AssetRegistrationScreen → OFC picker → save → `AssetFound`
-7. On inspection submit: second ScanEvent logged (INSPECTION)
-
----
-
 ## Sync Architecture
 
-### Principles
-- Device UUIDs assigned at creation time — never by the backend
-- `isSynced` only flips to `true` after HTTP 200 confirmation
-- Backend upserts on `_id` — re-sending any record is always safe
-- Sync order: organisations → sites → assets → tag_events → inspections → deficiencies → scan_events
-- 409 guards on backend: inspection rejected if asset not synced; deficiency rejected if inspection not synced
-- All endpoints require Bearer token (injected by AuthInterceptor — no per-method header)
-- `TapLogApplication.onCreate()` calls `scheduleSyncIfNeeded()` — ensures sync triggers on every app start
-- `ExistingWorkPolicy.KEEP` prevents duplicate sync jobs
+### Sync order
+organisations → sites → assets → tag_events → inspections → deficiencies → scan_events
 
 ### Backend API
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /api/v1/organisations` | Bearer | Upsert org; links inspector's organisationId |
+| `POST /api/v1/organisations` | Bearer | Upsert org (incl. licensedVerticals); links inspector's organisationId |
 | `POST /api/v1/sites` | Bearer | Upsert site |
 | `POST /api/v1/assets` | Bearer | Upsert asset |
 | `POST /api/v1/tag_events` | Bearer | Upsert tag lifecycle events |
 | `POST /api/v1/inspections` | Bearer | Upsert inspection, 409 if asset missing |
 | `POST /api/v1/deficiencies` | Bearer | Upsert deficiency, 409 if inspection missing |
 | `POST /api/v1/scan_events` | Bearer | Upsert scan event |
+| `GET /api/v1/verticals` | Bearer | Returns VerticalConfig list for org's licensedVerticals (PENDING) |
+| `GET /api/v1/verticals/{code}` | Bearer | Returns single VerticalConfig or 404 (PENDING) |
 
 ### MongoDB Structure
 ```
 farpost-dev cluster (Atlas M0 free tier)
-├── farpost      (Farpost collections — untouched)
-└── taplog       (TapLog collections)
+└── taplog
     ├── organisations
     ├── sites
     ├── assets
@@ -455,79 +428,34 @@ farpost-dev cluster (Atlas M0 free tier)
     ├── inspections
     ├── deficiencies
     ├── scan_events
-    ├── inspectors       (Module 28 — unique index on cert_number)
-    ├── devices          (Module 28)
-    └── pending_verifications  (Module 28 — TTL index on expires_at)
+    ├── inspectors       (unique index on cert_number)
+    ├── devices
+    ├── pending_verifications  (TTL index on expires_at)
+    └── verticals        (PENDING — Ember seed document + future vertical configs)
 ```
 
 ---
 
-## PDF Report Architecture (Module 29)
+## OpenSpec State
 
-### Generation
-- `PdfReportGenerator.kt` — `android.graphics.pdf.PdfDocument` canvas renderer (API 19+, zero dependencies)
-- A4 page (595×842 points), sections: header → site/client → asset → inspection → deficiencies → footer
-- Deficiency list truncated at 10 with "…and N more" note
-- PASS/FAIL/REQUIRES ATTENTION rendered with distinct colors
-- File: `getExternalFilesDir(null)/TapLog/taplog_report_<inspectionId_prefix>.pdf`
+### Archived modules
+| Archive | Date |
+|---|---|
+| module-27-scan-log-tag-lifecycle | 2026-05-31 |
+| module-28-authenticated-identity | 2026-05-31 |
+| module-29-pdf-reports | 2026-05-31 |
+| module-30-photo-capture | 2026-05-31 |
+| module-34-vertical-engine | 2026-06-01 |
 
-### Sharing
-- `ReportRepository.kt` — calls PdfReportGenerator, wraps file in FileProvider URI
-- FileProvider authority: `ca.taplog.app.fileprovider`
-- `res/xml/file_paths.xml` — external-files-path for `TapLog/` subdirectory
-- `FileProvider` registered in `AndroidManifest.xml` (exported=false, grantUriPermissions=true)
-- Share intent via `Intent.ACTION_SEND` → `Intent.createChooser` → Android share sheet
-- `EmberViewModel.shareReportEvent: SharedFlow<Intent>` — `MainActivity` `LaunchedEffect` collects and starts chooser
+### Active specs (`openspec/specs/`)
+- `ofc-checklists` — checklist source updated to VerticalConfig.assetTypeRegistry
+- `org-site-sync` — licensedVerticals added to Organisation + sync payload
+- `vertical-config` — VerticalRegistry, Room cache, backend endpoints
+- `vertical-form-engine` — field-driven InspectionFormScreen, EntryEventScreen stub
+- `inspector-auth`, `scan-log`, `tag-lifecycle`, `inspection-report`, `deficiency-photo-capture`
 
----
-
-## Key Implementation Notes
-
-### Tag Lifecycle
-- `Asset.nfcTagId` is a current pointer, not permanent identity
-- `TagEvent` is insert-only — DAMAGED/LOST/REPLACED/REMOVED retire reasons
-- Tag replacement is an atomic Room transaction: retire old TagEvent + update Asset.nfcTagId + insert new TagEvent
-- `retiredByInspectorId` populated from `InspectorPreferences.inspectorId` (JWT claim)
-
-### Inspector Identity (post Module 28)
-- `InspectorPreferences.kt` stores: `authToken`, `refreshToken`, `inspectorId`, `deviceId` only
-- `decodeJwtClaims(token)` — base64 decode JWT payload, returns `InspectorClaims`, no library needed
-- `EmberViewModel.inspectorClaims: StateFlow<InspectorClaims?>` derived from authToken flow
-- `InspectionFormScreen` shows `InspectorIdentityCard` (read-only) — no editable name/cert fields
-- `inspectorId` populated on every ScanEvent and TagEvent retirement (post Module 28)
-
-### Sync Trigger
-- `TapLogApplication.onCreate()` calls `scheduleSyncIfNeeded(this)` — critical for fresh install
-- `ConnectivityReceiver` fires on network change — also calls `scheduleSyncIfNeeded`
-- `ExistingWorkPolicy.KEEP` — if `taplog_sync` work already queued, new requests are ignored
-- To force sync in dev: Background Task Inspector in Android Studio → cancel + re-enqueue
-
-### Vertical Architecture
-- `TapLogVertical` enum: EMBER, ANCHOR, HATCH, NEWEL, MAST, CRANE, SEAM, SPAN
-- `Asset.vertical` field added in MIGRATION_5_6 — default EMBER
-- Future screens in `ui/anchor/`, `ui/hatch/`, etc. — same shared engine
-
-### Back Navigation
-- `BackHandler` added to all navigable screens — system back gesture mirrors in-app back button
-- `AssetDetailSource` enum lives in `ca.taplog.app.data` (not `ui.ember`)
-
-### Scroll / Keyboard
-- All form screens: `verticalScroll(rememberScrollState())` + `imePadding()`
-- `AndroidManifest.xml` activity: `windowSoftInputMode="adjustResize"`
-
-### Development Workflow
-- **File replacement in Android Studio:** select-all (Ctrl+A) → paste. Never Windows Explorer copy.
-- **Room migration crashes during dev:** clear app storage — faster than debugging
-- **`AssetDetailSource`** lives in `ca.taplog.app.data`
-- **`material-icons-extended`** required for `Icons.AutoMirrored.*` and `Icons.Default.*`
-- **Resend dev mode:** if `RESEND_API_KEY` is empty, verification codes print to console as `[DEV] code`
-- **passlib is removed** — use `bcrypt` directly (Python 3.13 compat)
-
-### Railway / Railpack
-- `requirements.txt` must be present for Railpack pip install trigger
-- Environment variables: `MONGODB_URL`, `DB_NAME`, `API_KEY`, `JWT_SECRET`, `RESEND_API_KEY`
-- TTL index on `pending_verifications.expires_at` must be created manually in Atlas
-- Unique index on `inspectors.cert_number` must be created manually in Atlas
+### Open design docs (`openspec/design-docs/`)
+- `inspection-cardinality.md` — Status: Open. Blocks Fleet, Hatch multi-asset sessions, Anchor batch pre-use. One NFC tap = one asset = one form is wrong for these verticals.
 
 ---
 
@@ -535,45 +463,41 @@ farpost-dev cluster (Atlas M0 free tier)
 
 ### Done ✅
 - NFC reading (foreground dispatch)
-- Room database — full entity hierarchy (Organisation, Site, Asset, Inspection, Deficiency)
-- EmberRepository, EmberViewModel with full ScanState machine
-- SplashScreen, OrganisationSetupScreen, SiteListScreen, SiteDetailScreen, SiteRegistrationScreen
-- AssetRegistrationScreen, AssetDetailScreen, AssetListScreen
-- InspectionFormScreen + AddDeficiencyDialog
-- OpenDeficienciesScreen — mark resolved
-- FastAPI backend — sync endpoints, live on Railway
-- MongoDB Atlas — taplog database
-- Retrofit HTTP client + SyncRepository + WorkManager SyncWorker
-- End-to-end sync verified on device
-- Android 16 NFC BAL fix
-- OFC asset type picker — 6 categories, 35 types, search, plain-English descriptions
-- Back navigation — source-aware, hierarchy-aware, BackHandler on all screens
-- Room v2→v3 migration (organisations + sites + asset restructure)
-- **Module 27** — ScanEvent (insert-only, every NFC tap), TagEvent (tag lifecycle), tag replacement workflow, checklistItems on all 35 OFC types, Room v3→v4, two new sync endpoints
-- **Module 28** — Inspector accounts: registration, email verification (6-digit, Resend), device registration, JWT, AuthInterceptor (401 refresh retry), org/site sync to backend, auth gate in MainActivity, read-only inspector identity in InspectionFormScreen, Room v4→v5→v6, TapLogVertical enum
-- **Module 29** — PDF inspection reports: PdfDocument (zero dependencies), FileProvider, share sheet, "Share Report" per inspection history card
-- **Module 30** — Photo capture for deficiencies: CAMERA permission, `ActivityResultContracts.TakePicture()` in `AddDeficiencyDialog`, `BitmapFactory` thumbnails in `DeficiencyChip` and `DeficiencyWithAssetCard`, zero new dependencies
+- Room database — full entity hierarchy
+- Ember vertical — full inspection flow, org/site hierarchy
+- FastAPI backend — all sync endpoints, live on Railway
+- Module 27 — ScanEvent (insert-only), TagEvent (lifecycle), checklistItems on all 35 OFC types, Room v3→v4
+- Module 28 — Inspector accounts: registration, email verification, JWT, AuthInterceptor, org/site sync, auth gate, Room v4→v5→v6
+- Module 29 — PDF inspection reports (PdfDocument, FileProvider, share sheet)
+- Module 30 — Photo capture for deficiencies (CAMERA permission, TakePicture, thumbnails)
+- Module 34 — Vertical engine: VerticalConfig/VerticalRegistry, field-driven InspectionFormScreen, Room v6→v7→v8, EntryEventScreen stub, licensedVerticals on Organisation
+
+### Pending backend (taplog-api)
+- Module 34 backend tasks 9.1–9.4: Organisation.licensed_verticals, verticals MongoDB collection (Ember seed), GET /api/v1/verticals, GET /api/v1/verticals/{code}
 
 ### Next
-- [ ] **Module 31** — Visual Asset Identification: photo → AI suggests OFC asset type (depends on Module 30 ✅)
-- [ ] **Module 31** — Visual Asset Identification — photo → AI suggests OFC asset type (depends on Module 30)
-- [ ] **Module 32** — Inspection guidance Level 2 — contextual OFC guidance panel on inspection form
-- [ ] **Module 33** — AI inspection co-pilot — OFC-aware, asset-context-aware, offline-cached Q&A
-- [ ] **Billing** — Stripe web checkout, subscription gating on Organisation — before OAFC November 2026
+- [ ] **Module 31** — Visual Asset Identification: photo → AI suggests OFC asset type
+- [ ] **Module 32** — Inspection guidance Level 2: contextual OFC guidance panel
+- [ ] **Module 33** — AI inspection co-pilot: OFC-aware, asset-context-aware Q&A
+- [ ] **Module 35** — Anchor config: add Anchor VerticalConfig to MongoDB (zero Android changes)
+- [ ] **Module 36** — Hatch config + EntryEventScreen implementation
+- [ ] **Billing** — Stripe web checkout, subscription gating — before OAFC November 2026
 
 ---
 
 ## Vertical Roadmap
 | Vertical | Domain | Status |
 |---|---|---|
-| Ember | Fire safety inspection | 🔨 Active build — v1 nearly complete |
-| Anchor | Fall protection | Specced, next after Ember |
-| Hatch | Confined space | Specced, tier 1 underserved |
-| Mast | Scaffolding | Tier 2 |
-| Crane | Crane/hoist | Tier 2 |
-| Seam | Welding/pressure | Tier 2 |
+| Ember | Fire safety inspection | ✅ Active — v1 complete, vertical engine live |
+| Anchor | Fall protection | Module 35 — backend config only |
+| Hatch | Confined space | Module 36 — EntryEventScreen + config |
+| Lift | Elevators / escalators | Tier 1 |
 | Newel | Home inspection | Held for pilot contact |
-| Span | Bridges/infrastructure | Tier 3 |
+| Apex | HVAC | Tier 2 |
+| Vault | Electrical | Tier 2 |
+| Crane | Crane and hoist | Tier 2 (inspection cardinality blocker) |
+| Fleet | Fleet vehicles | Tier 2 (inspection cardinality blocker) |
+| Span | Bridges / structures | Tier 3 |
 
 ---
 
@@ -582,52 +506,48 @@ farpost-dev cluster (Atlas M0 free tier)
 ### Android
 | File | Purpose |
 |---|---|
-| `ca.taplog.app/MainActivity.kt` | Entry point, NFC handling, auth gate, AuthFlow, EmberScanScreen, all state routing |
-| `ca.taplog.app/TapLogApplication.kt` | App singleton — all DAOs, repos, interceptor, authViewModelFactory. onCreate() schedules sync |
-| `ca.taplog.app/SyncWorker.kt` | WorkManager CoroutineWorker — calls syncAll(), handles retry/success |
-| `ca.taplog.app/ConnectivityReceiver.kt` | BroadcastReceiver — triggers sync on connectivity restore |
-| `ca.taplog.app.data/EmberModels.kt` | All entities + enums (incl. TapLogVertical, RetireReason, InspectorClaims is here too via InspectorPreferences.kt) |
-| `ca.taplog.app.data/Converters.kt` | TypeConverters for all Room enums incl. TapLogVertical |
-| `ca.taplog.app.data/EmberDAO.kt` | All DAOs + getByInspection on DeficiencyDao |
-| `ca.taplog.app.data/AppDatabase.kt` | Room singleton, version 6, migrations 2→3→4→5→6 |
-| `ca.taplog.app.data/EmberRepository.kt` | Data access layer — includes replaceTag() atomic transaction |
-| `ca.taplog.app.data/InspectorPreferences.kt` | DataStore: auth fields + deviceId + decodeJwtClaims() + InspectorClaims (file in ui/ember/ dir, package ca.taplog.app.data) |
-| `ca.taplog.app.data/OFCAssetTypes.kt` | 35 OFC asset types with checklistItems |
-| `ca.taplog.app.data/SyncModels.kt` | Wire-format models for all 7 entity types + toSyncRequest() extensions |
-| `ca.taplog.app.data/RetrofitClient.kt` | authApiService (no interceptor) + createSyncApiService(AuthInterceptor) |
-| `ca.taplog.app.data/TapLogApiService.kt` | Retrofit interface — 7 sync endpoints, no auth header (injected) |
-| `ca.taplog.app.data/AuthApiService.kt` | Retrofit interface — 6 auth endpoints + all request/response models |
-| `ca.taplog.app.data/AuthInterceptor.kt` | Bearer injection, 401 → refresh → retry → clearAuth |
-| `ca.taplog.app.data/PdfReportGenerator.kt` | PdfDocument canvas renderer — A4 inspection report |
-| `ca.taplog.app.data/ReportRepository.kt` | generateAndGetUri() — PDF file → FileProvider content URI |
-| `ca.taplog.app.data/SyncRepository.kt` | Batch sync, updated order, Bearer auth, org/site included |
-| `ca.taplog.app.ui.auth/AuthViewModel.kt` | AuthState machine + register/login/verify/registerDevice/resend |
-| `ca.taplog.app.ui.auth/LoginScreen.kt` | Email + password |
-| `ca.taplog.app.ui.auth/RegistrationScreen.kt` | Name, email, cert, password |
-| `ca.taplog.app.ui.auth/EmailVerificationScreen.kt` | 6-digit code + resend |
-| `ca.taplog.app.ui.auth/NewDeviceScreen.kt` | New device detected, 6-digit code |
-| `ca.taplog.app.ui.ember/EmberViewModel.kt` | ScanState, inspectorClaims, shareReport, shareReportEvent |
-| `ca.taplog.app.ui.ember/InspectionFormScreen.kt` | Pre-inspection checklist + InspectorIdentityCard + form |
-| `ca.taplog.app.ui.ember/AssetDetailScreen.kt` | Scan history + Replace Tag + Share Report per inspection |
+| `ca.taplog.app/MainActivity.kt` | Entry point, NFC, auth gate, Inspecting state routes by roleModel |
+| `ca.taplog.app/TapLogApplication.kt` | App singleton, initVerticalRegistry(), verticalRegistryReady StateFlow |
+| `ca.taplog.app/SyncWorker.kt` | WorkManager CoroutineWorker — syncAll() |
+| `ca.taplog.app/ConnectivityReceiver.kt` | BroadcastReceiver — sync on connectivity restore |
+| `ca.taplog.app.data/EmberModels.kt` | All entities + enums incl. Organisation.licensedVerticals |
+| `ca.taplog.app.data/VerticalModels.kt` | Full vertical data model + VerticalRegistry singleton |
+| `ca.taplog.app.data/Converters.kt` | TypeConverters: enums + List<String> + VerticalConfig (Gson) |
+| `ca.taplog.app.data/EmberDAO.kt` | All DAOs |
+| `ca.taplog.app.data/VerticalConfigDao.kt` | VerticalConfigEntity + VerticalConfigDao (upsert/getAll) |
+| `ca.taplog.app.data/AppDatabase.kt` | Room singleton, version 8, migrations 2→3→4→5→6→7→8 |
+| `ca.taplog.app.data/EmberRepository.kt` | Data access layer incl. replaceTag() atomic transaction |
+| `ca.taplog.app.data/EmberVerticalConfig.kt` | EmberVerticalConfig.build() — static Ember VerticalConfig fallback |
+| `ca.taplog.app.data/InspectorPreferences.kt` | DataStore: auth + deviceId + decodeJwtClaims() (in ui/ember/ dir, package ca.taplog.app.data) |
+| `ca.taplog.app.data/OFCAssetTypes.kt` | 35 OFC asset types — retained as static fallback |
+| `ca.taplog.app.data/SyncModels.kt` | Wire-format models + toSyncRequest() — OrganisationSyncRequest includes licensedVerticals |
+| `ca.taplog.app.data/RetrofitClient.kt` | Dual Retrofit clients |
+| `ca.taplog.app.data/TapLogApiService.kt` | Retrofit interface — verticals GETs + sync POSTs |
+| `ca.taplog.app.data/AuthApiService.kt` | Auth endpoints |
+| `ca.taplog.app.data/AuthInterceptor.kt` | Bearer injection, 401 refresh retry |
+| `ca.taplog.app.data/PdfReportGenerator.kt` | PdfDocument canvas renderer |
+| `ca.taplog.app.data/ReportRepository.kt` | generateAndGetUri() → FileProvider URI |
+| `ca.taplog.app.data/SyncRepository.kt` | Batch sync, Bearer auth, full sync order |
+| `ca.taplog.app.ui.auth/` | AuthViewModel + 4 auth screens |
+| `ca.taplog.app.ui.ember/EmberViewModel.kt` | ScanState, inspectorClaims, shareReport |
+| `ca.taplog.app.ui.ember/InspectionFormScreen.kt` | Field-driven: ResultOption selector + FormField loop — zero OFC imports |
+| `ca.taplog.app.ui.ember/EntryEventScreen.kt` | MULTI_ROLE stub — "Multi-role entry form — coming soon" |
+| `ca.taplog.app.ui.ember/SplashScreen.kt` | Accepts registryReady: Boolean |
+| `ca.taplog.app.ui.ember/AssetDetailScreen.kt` | Scan history + Replace Tag + Share Report |
 | `app/src/main/AndroidManifest.xml` | NFC, windowSoftInputMode, ConnectivityReceiver, FileProvider |
-| `app/src/main/res/xml/file_paths.xml` | FileProvider path config for TapLog/ external dir |
+| `app/src/main/res/xml/file_paths.xml` | FileProvider path config |
 
 ### Backend
 | File | Purpose |
 |---|---|
-| `app/main.py` | FastAPI app, all routers registered |
-| `app/database.py` | Motor client, Settings incl. jwt_secret + resend_api_key |
+| `app/main.py` | FastAPI app, all routers |
+| `app/database.py` | Motor client, Settings |
 | `app/auth.py` | JWT, bcrypt (direct), send_verification_email |
 | `app/dependencies.py` | get_current_inspector Bearer dependency |
-| `app/models.py` | All Pydantic models (sync entities + auth + org/site) |
-| `app/routers/auth.py` | All 6 auth endpoints |
+| `app/models.py` | All Pydantic models |
+| `app/routers/auth.py` | 6 auth endpoints |
 | `app/routers/organisations.py` | POST /api/v1/organisations |
-| `app/routers/sites.py` | POST /api/v1/sites |
-| `app/routers/assets.py` | POST /api/v1/assets |
-| `app/routers/inspections.py` | POST /api/v1/inspections |
-| `app/routers/deficiencies.py` | POST /api/v1/deficiencies |
-| `app/routers/scan_events.py` | POST /api/v1/scan_events |
-| `app/routers/tag_events.py` | POST /api/v1/tag_events |
+| `app/routers/verticals.py` | GET /api/v1/verticals, GET /api/v1/verticals/{code} (PENDING) |
 | `requirements.txt` | Railpack pip install trigger |
 
 ### Project docs & tooling
@@ -638,9 +558,12 @@ farpost-dev cluster (Atlas M0 free tier)
 | `taplog-investor-summary.md` | Pitch document |
 | `taplog-lightbulbs.md` | Product insight moments |
 | `taplog-pilot-tester-pool.md` | Prospective pilot users |
-| `taplog-md-prime-directives.md` | Session workflow rules — source of truth for AGENTS.md |
+| `taplog-md-prime-directives.md` | Session workflow rules |
 | `.claude/AGENTS.md` | Auto-read by Claude Code — copy of prime directives |
 | `openspec/config.yaml` | OpenSpec configuration |
+| `openspec/module-34-context.md` | Architectural context for vertical engine (reference) |
+| `openspec/module-34-amendments.md` | ResultOption + TriggerConfig amendments (reference) |
+| `openspec/design-docs/inspection-cardinality.md` | Open design doc — blocks Fleet/Hatch/Anchor multi-asset |
 
 ---
 

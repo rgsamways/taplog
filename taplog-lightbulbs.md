@@ -91,4 +91,22 @@
 
 ---
 
+## LB-010 — Ask what's different before building the abstraction
+**Module:** Module 34 — Vertical engine (Session 10)
+**Trigger:** Before implementing the `VerticalConfig` abstraction, the question was raised: what is actually different between verticals? The initial design assumed `resultOptions: List<String>` and `intervalMonths: Int?` were sufficient.
+**Insight:** The surface-level differences between verticals (different labels, different intervals) are easy to parameterize. The deeper differences are structural: inspection cardinality (one NFC tap = one asset = one form is wrong for Fleet and Hatch), pass/fail downstream logic (Anchor's "Remove from service" is a physical action, not just a label), and trigger type (Fleet runs on mileage, not months). Parameterizing labels without parameterizing downstream logic produces a config engine that looks general but isn't — the hard-coded assumptions just move from screen code to data structures.
+**What we did:** Replaced `resultOptions: List<String>` with `List<ResultOption>` where each option carries a `ResultAction` enum (NONE, REMOVE_FROM_SERVICE, NOTIFY_AUTHORITY, ISSUE_CERTIFICATE, DELIVER_REPORT). Replaced `intervalMonths: Int?` with `TriggerConfig` carrying type (CALENDAR, MILEAGE, ENGINE_HOURS) and the appropriate interval value. Left inspection cardinality as an open design doc — it's load-bearing across Room FKs, sync payload, and ScanState, and speculative change would be more expensive than the current limitation.
+**Broader principle:** The right time to ask "what's different?" is before building the abstraction, not after. A premature abstraction locks in the wrong shape. An abstraction built after cataloguing the differences is almost always simpler and more durable. Two hours of dissimilarity analysis avoids two sprints of refactoring.
+
+---
+
+## LB-011 — Context files are the cheapest form of architectural documentation
+**Module:** Module 34 — Vertical engine (Session 10)
+**Trigger:** The `/opsx:propose` command ran and produced a complete set of artifacts — for the wrong module entirely. The proposal described adding a fire pump asset type. The actual module was a major architectural refactor. The context wasn't in the repo; it was in a strategy session transcript that hadn't been committed.
+**Insight:** An AI that reads the repo cold will build from what's there. If the architectural intent for a module lives only in a chat session or a person's head, the AI has no way to distinguish "add a fire pump type" from "build a multi-vertical engine." A single markdown file dropped into `openspec/` with the strategic context for an upcoming module costs 15 minutes to write and eliminates an entire category of propose/apply do-overs.
+**What we did:** Added `openspec/module-34-context.md` with full architectural intent: what the module is, key decisions, data structures, vertical catalogue, scope boundary, and what doesn't change. The next propose read it, produced the right proposal on the first run.
+**Broader principle:** The gap between "what you intend to build" and "what the AI will propose" is exactly equal to the gap between what's in the repo and what's in your head. Close that gap with files, not prompts. Files persist across sessions, team members, and tool switches. Prompts don't.
+
+---
+
 *Add new lightbulb moments as they occur during the build. Format: trigger → insight → action → broader principle (if any).*

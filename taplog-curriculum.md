@@ -595,11 +595,80 @@ Activated `Deficiency.photoPath: String?` — the field that had been in the Roo
 
 ---
 
+## Module 34 — Vertical engine + field-driven forms
+
+**What we did:**
+Architectural pivot session. Module 34 was promoted ahead of Modules 31–33 because the vertical engine is the foundational layer that all future verticals depend on. TapLog is now a vertical factory — adding a new vertical means creating a MongoDB document and a seed script, no Android code changes.
+
+**Data model (`VerticalModels.kt`):**
+- `VerticalConfig` — full per-vertical configuration: displayName, regulatoryFramework, triggerModel, roleModel, formProfile, assetTypeRegistry
+- `InspectionFormProfile` — `resultOptions: List<ResultOption>` (replaced `List<String>`), `fields: List<FormField>`, `deficienciesEnabled`, `photoRequired`
+- `ResultOption(code, label, action: ResultAction)` — `ResultAction` enum: NONE, REMOVE_FROM_SERVICE, NOTIFY_AUTHORITY, ISSUE_CERTIFICATE, DELIVER_REPORT. Downstream logic encoded in config, not hardcoded
+- `VerticalAssetType` — `triggerConfig: TriggerConfig` (replaced `intervalMonths: Int?`); `TriggerConfig` carries type (CALENDAR/MILEAGE/ENGINE_HOURS) + appropriate interval value
+- `TriggerModel` gains `MILEAGE` and `ENGINE_HOURS` values
+- `VerticalRegistry` singleton — `register()`, `get()` (throws on unregistered vertical), `all()`
+
+**Room v6 → v7 → v8:**
+- `MIGRATION_6_7`: `vertical_configs` table (verticalCode PK, configJson TEXT) — stores VerticalConfig JSON blobs
+- `MIGRATION_7_8`: `organisations.licensedVerticals` TEXT column (DEFAULT '["EMBER"]') — billing hook
+- `VerticalConfigEntity` + `VerticalConfigDao` (upsert + getAll)
+
+**Startup fallback chain (`TapLogApplication.initVerticalRegistry()`):**
+1. Fetch `GET /api/v1/verticals` → upsert to Room → register each config
+2. Fetch fails (offline) → load from `VerticalConfigDao.getAll()` → register from cache
+3. Cache empty (first cold start, no connectivity) → `VerticalRegistry.register(EmberVerticalConfig.build())`
+4. `verticalRegistryReady: StateFlow<Boolean>` set to true → unblocks SplashScreen
+
+**`EmberVerticalConfig.build()`:** Translates all `OFCCategory`/`OFCAssetType` entries to `VerticalAssetType` instances with `TriggerConfig(CALENDAR, intervalMonths)`. Ember form profile: resultOptions (PASS/REQUIRES_ATTENTION/FAIL with ResultAction.NONE), single notes TEXT FormField, deficienciesEnabled=true. `OFCAssetTypes.kt` retained — not deleted until backend cache proven.
+
+**`InspectionFormScreen` refactor:**
+- All `OFCCategory`, `OFCAssetType`, `OFCAssetTypes` imports removed
+- Checklist: `VerticalRegistry.get(asset.vertical).assetTypeRegistry.find { it.code == asset.assetType }?.checklistItems`
+- Result selector: iterates `formProfile.resultOptions`, shows `option.label`, maps `option.code` to `InspectionResult.valueOf()` on submit
+- Fields: loop over `formProfile.fields`, renders by `FieldType` (TEXT = OutlinedTextField, BOOLEAN = Checkbox, others as text fallback)
+- Deficiencies: conditional on `formProfile.deficienciesEnabled`
+- Ember output is identical to pre-Module-34 behaviour
+
+**Routing:**
+- `EntryEventScreen.kt` — stub: "Multi-role entry form — coming soon" + back button
+- `MainActivity` `Inspecting` state: `if (roleModel == MULTI_ROLE) EntryEventScreen else InspectionFormScreen`
+
+**Organisation model:**
+- `Organisation.licensedVerticals: List<String> = listOf("EMBER")` added
+- `List<String>` TypeConverter added to `Converters.kt` (Gson)
+- `OrganisationSyncRequest` and `toSyncRequest()` updated to include `licensedVerticals`
+
+**API:**
+- `TapLogApiService` gains `getVerticals()` and `getVertical(code)` Retrofit declarations
+- Backend implementation (tasks 9.1–9.4) pending in `taplog-api` repo
+
+**Amendments before apply:**
+The propose-then-amend pattern was demonstrated this session. After `/opsx:propose` generated the full artifact set, a strategy session identified three structural gaps in the initial design: (1) `resultOptions: List<String>` loses downstream action semantics, (2) `intervalMonths: Int?` can't express Fleet's mileage-based trigger, (3) inspection cardinality is load-bearing and needs a design doc before being addressed. Amendments 1 and 2 were applied to `VerticalModels.kt` and `EmberVerticalConfig.kt` before `/opsx:apply`. Amendment 3 was deferred as `openspec/design-docs/inspection-cardinality.md`.
+
+**OpenSpec:** Module 34 archived. 4 specs synced: `vertical-config` (new), `vertical-form-engine` (new), `ofc-checklists` (updated), `org-site-sync` (updated).
+
+**Key lessons:**
+- Ask "what's different between verticals?" before building the abstraction. Two hours cataloguing dissimilarities avoids two sprints of refactoring. Surface differences (labels, intervals) are easy to parameterize. Structural differences (inspection cardinality, downstream result logic, mileage-based triggers) require deliberate model choices.
+- `resultOptions: List<String>` is a label system, not a behavior system. When a result should trigger a physical action (remove from service, notify authority, issue certificate), encode that in the data — not in screen code that appears later in a different vertical's UI.
+- `intervalMonths: Int?` with null meaning "event-driven" is a semantic hack. A proper `TriggerConfig` with an explicit type enum is the same amount of code and carries meaning that `null` never can.
+- Context files are the cheapest architectural documentation. Dropping `openspec/module-34-context.md` before the propose run produced the right proposal on the first attempt. Without it, the first run proposed adding a fire pump asset type.
+- The propose-then-amend pattern is correct for large architectural modules. A full propose run surfaces the spec shape before any code is written. Amendments can then be applied to the spec artifacts before apply runs. No code written until the shape is right.
+- `OFCAssetTypes.kt` must not be deleted until the backend vertical config cache is proven in production. The fallback is what keeps Ember working on cold starts with no connectivity. Delete it too early and you have a cold-start crash.
+
+---
+
 ## What comes next (upcoming modules)
+
+**Immediate:** Complete Module 34 backend tasks (9.1–9.4) in `C:\dev\taplog-api`:
+- Add `licensed_verticals` to Organisation model
+- Create `verticals` MongoDB collection with Ember seed document
+- Implement `GET /api/v1/verticals` and `GET /api/v1/verticals/{code}`
 
 - **Module 31** — Visual Asset Identification: photo → AI suggests OFC asset type (depends on Module 30 ✅)
 - **Module 32** — Inspection guidance Level 2: collapsible contextual OFC guidance panel on InspectionFormScreen
-- **Module 33** — AI inspection co-pilot: OFC-aware, asset-context-aware, offline-cached Q&A; pre-inspection building briefing
+- **Module 33** — AI inspection co-pilot: OFC-aware, asset-context-aware, offline-cached Q&A
+- **Module 35** — Anchor config: add Anchor VerticalConfig to MongoDB (zero Android changes)
+- **Module 36** — Hatch config + EntryEventScreen implementation
 - **Billing** — Stripe web checkout, subscription gating on Organisation — before OAFC November 2026
 
 ---
@@ -653,6 +722,19 @@ Activated `Deficiency.photoPath: String?` — the field that had been in the Roo
 | synced_at | Epoch millis timestamp set by backend on upsert — used for provisioning queries in v2 |
 | OkHttp | HTTP engine underneath Retrofit — handles connections, logging, interceptors |
 | BuildConfig | Generated class holding compile-time constants — used to store API keys from local.properties |
+| VerticalConfig | Full configuration for one TapLog vertical — asset types, form profile, trigger model, role model |
+| VerticalRegistry | Singleton that holds registered VerticalConfig instances; populated at startup; throws on unregistered vertical |
+| VerticalAssetType | A VerticalConfig's version of OFCAssetType — includes TriggerConfig instead of intervalMonths |
+| TriggerConfig | Encodes how inspections are triggered: CALENDAR (months), MILEAGE, ENGINE_HOURS, or event-driven |
+| InspectionFormProfile | Per-vertical form definition: resultOptions, fields, deficienciesEnabled, photoRequired |
+| ResultOption | A result choice with code, display label, and ResultAction — replaces plain string result options |
+| ResultAction | Enum encoding downstream behavior after a result: NONE, REMOVE_FROM_SERVICE, NOTIFY_AUTHORITY, ISSUE_CERTIFICATE, DELIVER_REPORT |
+| FormField | A dynamic form input definition: key, label, FieldType, required, applicableAssetTypes |
+| VerticalConfigEntity | Room entity caching a VerticalConfig as a JSON blob in the vertical_configs table |
+| EmberVerticalConfig | Kotlin object with build() function — translates OFCCategory to VerticalConfig; used as cold-start fallback |
+| licensedVerticals | List<String> on Organisation — billing hook controlling which vertical configs the backend returns |
+| EntryEventScreen | Stub composable for MULTI_ROLE assets — placeholder for Hatch entry event flow (Module 36) |
+| Inspection cardinality | The assumption that one NFC tap = one asset = one inspection form — wrong for Fleet, Hatch, Anchor batch. Open design doc. |
 | local.properties | Gitignored file at project root — safe place for secrets like API keys |
 | SyncResult | Sealed class with Success / Conflict / Failure — clean return type for sync operations |
 | SyncWorker | WorkManager CoroutineWorker that calls syncAll() when connectivity is available |
