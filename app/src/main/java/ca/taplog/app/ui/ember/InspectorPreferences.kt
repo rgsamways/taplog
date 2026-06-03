@@ -30,11 +30,22 @@ class InspectorPreferences(private val context: Context) {
         val REFRESH_TOKEN = stringPreferencesKey("refresh_token")
         val INSPECTOR_ID = stringPreferencesKey("inspector_id")
         val DEVICE_ID = stringPreferencesKey("device_id")
+        val USER_ROLE_KEY = stringPreferencesKey("user_role")
     }
 
     val authToken: Flow<String?> = context.dataStore.data.map { it[AUTH_TOKEN] }
     val refreshToken: Flow<String?> = context.dataStore.data.map { it[REFRESH_TOKEN] }
     val inspectorId: Flow<String?> = context.dataStore.data.map { it[INSPECTOR_ID] }
+
+    val userRole: Flow<UserRole> = context.dataStore.data.map { prefs ->
+        val stored = prefs[USER_ROLE_KEY]
+        if (stored != null) runCatching { UserRole.valueOf(stored) }.getOrDefault(UserRole.INSPECTOR)
+        else UserRole.INSPECTOR
+    }
+
+    val isUserRoleSet: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[USER_ROLE_KEY] != null
+    }
 
     suspend fun getAuthToken(): String? = authToken.first()
     suspend fun getRefreshToken(): String? = refreshToken.first()
@@ -45,6 +56,10 @@ class InspectorPreferences(private val context: Context) {
             prefs[REFRESH_TOKEN] = refreshToken
             prefs[INSPECTOR_ID] = inspectorId
         }
+    }
+
+    suspend fun setUserRole(role: UserRole) {
+        context.dataStore.edit { prefs -> prefs[USER_ROLE_KEY] = role.name }
     }
 
     suspend fun clearAuth() {

@@ -13,7 +13,7 @@ The product being built is **TapLog** (taplog.ca) — an offline-first NFC/RFID 
 **Dev device:** Google Pixel 10 Pro XL
 **Project location:** C:\dev\taplog
 **Package:** ca.taplog.app
-**Stack:** Kotlin 2.3.21 · Jetpack Compose · Room 2.8.4 · KSP 2.3.9 · AGP 9.2.1 · DataStore 1.1.1 · room.generateKotlin=true · material-icons-extended
+**Stack:** Kotlin 2.3.21 · Jetpack Compose · Room 2.8.4 · KSP 2.3.9 · AGP 9.2.1 · DataStore 1.1.1 · room.generateKotlin=true · material-icons-extended · Mapbox Maps SDK 11.12.0
 
 **Backend location:** C:\dev\taplog-api
 **Backend stack:** Python 3.12 · FastAPI · Motor · MongoDB Atlas · Railway
@@ -640,7 +640,7 @@ Architectural pivot session. Module 34 was promoted ahead of Modules 31–33 bec
 
 **API:**
 - `TapLogApiService` gains `getVerticals()` and `getVertical(code)` Retrofit declarations
-- Backend implementation (tasks 9.1–9.4) pending in `taplog-api` repo
+- Backend implementation (tasks 9.1–9.4) completed in next session
 
 **Amendments before apply:**
 The propose-then-amend pattern was demonstrated this session. After `/opsx:propose` generated the full artifact set, a strategy session identified three structural gaps in the initial design: (1) `resultOptions: List<String>` loses downstream action semantics, (2) `intervalMonths: Int?` can't express Fleet's mileage-based trigger, (3) inspection cardinality is load-bearing and needs a design doc before being addressed. Amendments 1 and 2 were applied to `VerticalModels.kt` and `EmberVerticalConfig.kt` before `/opsx:apply`. Amendment 3 was deferred as `openspec/design-docs/inspection-cardinality.md`.
@@ -657,19 +657,220 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 
 ---
 
+## Module 34 backend — Verticals endpoint + Ember seed
+
+**What we did:**
+Completed the four backend tasks deferred from Module 34's Android session:
+
+- Added `licensed_verticals: List[str] = ["EMBER"]` to the Organisation Pydantic model; included in org upsert and API response
+- Created `verticals` MongoDB collection; seeded with full Ember `VerticalConfig` JSON document — complete asset type registry, form profile with `ResultOption` + `TriggerConfig` structures, all 35 OFC types
+- Implemented `GET /api/v1/verticals` — returns configs filtered by `org.licensed_verticals`; Bearer auth required
+- Implemented `GET /api/v1/verticals/{code}` — returns single config or 404; Bearer auth required
+- Deployed to Railway; `TapLogApplication.initVerticalRegistry()` now fetches live from backend on first launch
+
+With these tasks complete, the vertical engine fallback chain is fully operational: backend fetch → Room cache → static Ember config. Cold starts on offline devices still work via the Kotlin fallback.
+
+---
+
+## Module 35 — Brand theme + app polish
+
+**What we did:**
+Full brand application session. TapLog now has a complete, coherent visual identity across all app states.
+
+**Color.kt:**
+Full TapLog brand palette defined as named constants:
+- Navy scale: `TapLogNavy900` (0xFF040F1D) → `TapLogNavy50` (0xFFEBF2FA); `TapLogNavy800` is the brand primary background
+- Teal scale: `TapLogTeal900` → `TapLogTeal50`; `TapLogTeal400` (0xFF1D9E75) is the primary action color; `TapLogTeal200` (0xFF5DCAA5) is the tap dot / accent
+- Neutral gray scale: 900 → 50
+- Semantic status: `TapLogSuccess` (=Teal400), `TapLogWarning` (amber), `TapLogDanger` (red), `TapLogInfo` (blue)
+- Deficiency severity colors: critical (red), major (amber), minor (blue), observed (gray)
+- Vertical cluster accent colors: life-safety coral, property purple, infrastructure blue, industrial amber
+
+**Theme.kt:**
+Material3 `lightColorScheme` and `darkColorScheme` populated from the brand palette:
+- Light: Navy800 as primary, Teal400 as secondary, White surface
+- Dark: Teal200 as primary (bright on dark), Teal400 as secondary, Navy900/800 as background/surface
+- `TapLogTheme` composable wires up both schemes via `isSystemInDarkTheme()`
+
+**Type.kt:**
+`TapLogTypography` defined and bound to `MaterialTheme.typography` in `TapLogTheme`.
+
+**SplashScreen.kt — Option A brand lockup:**
+- Canvas-drawn `drawTapLogIcon()`: navy rounded-rect background, three NFC arcs (opacity 100/45/20%), teal phone body, teal-deep screen, three log lines (full/60%/35% opacity), home bar, tap dot circle
+- Animated entrance: icon scale 0.85→1 + alpha 0→1 (500ms EaseOutCubic), wordmark fade 400ms, tagline fade 350ms — all staggered with `delay()`
+- Wordmark: "**Tap**" bold white + "Log" normal teal, 40sp, letterSpacing -1.5sp
+- Tagline: "TAP. LOG. DONE." 11sp, 2sp letterSpacing, gray muted
+- Ready state: "tap to continue" + teal dot fade in once `registryReady` is true
+- Brand colors hardcoded as private constants — MaterialTheme not available when splash renders
+
+**MainActivity.kt:**
+- `Crossfade(targetState = screen, animationSpec = tween(400), label = "splash_to_app")` wraps the top-level screen slot
+- Eliminates the hard cut between splash and app content
+
+**Key lessons:**
+- Hardcode brand colors on the splash screen. The splash renders before `MaterialTheme` is set up — using `MaterialTheme.colorScheme.*` on the splash would require the theme to be initialized first, which defeats the purpose. Private constants at the top of the file is the correct pattern.
+- `Crossfade` between top-level screen states is the right tool for a splash-to-app transition — it handles the animation automatically and the code stays readable. `tween(400)` is the right duration.
+- Canvas-based icon drawing (not PNG, not Drawable, not vector XML) gives perfect density-independent sharpness and opens the door for icon animation in a future session.
+- A complete color system has three layers: named brand colors (the palette), semantic tokens (success/warning/error), and theme bindings (light/dark schemes). Keep these as three separate files/sections — mixing them creates maintenance complexity.
+
+---
+
+## Module 36 — Site map (Mapbox)
+
+**What we did:**
+Geocoding and map view for the site dashboard. Inspectors can now toggle between list and map view of their sites. Sites are geocoded at save time; existing sites are geocoded lazily on first map open.
+
+**Room v8 → v9:**
+- `MIGRATION_8_9`: `ALTER TABLE sites ADD COLUMN latitude REAL` + `ALTER TABLE sites ADD COLUMN longitude REAL`
+- `Site` entity gains `latitude: Double? = null` and `longitude: Double? = null`
+- `AppDatabase` version bumped to 9
+
+**GeocodingRepository.kt (new):**
+- `geocode(address, city, province): Pair<Double, Double>?` — Mapbox Geocoding REST API v5 endpoint
+- Parameters: `country=CA&limit=1&access_token=...`
+- Runs on `Dispatchers.IO` via `URL(url).readText()` — no new dependencies (OkHttp already in project)
+- Returns null on any error (no connectivity, API error, zero results) — non-fatal
+- Token guard: skips if token is blank or placeholder value
+
+**EmberViewModel updates:**
+- `saveSite()` — after Room insert, launches background coroutine to geocode and upsert with coords if successful
+- `geocodeUnresolvedSites(sites)` — filters sites with null lat, geocodes sequentially, upserts each on success
+- `GeocodingRepository` injected via constructor, wired in `TapLogApplication`
+
+**SiteMapView.kt (new):**
+- `MapboxMap` composable with `MapEffect(Unit)` loading `Style.DARK`
+- Camera initialized via `rememberMapViewportState`: centroid of geocoded sites at zoom 10, or Ontario fallback (`-79.3832, 43.6532`) at zoom 7
+- `ViewAnnotation` per geocoded site, positioned at `Point.fromLngLat(longitude, latitude)`, `allowOverlap(false)`
+- `SitePin` composable: `Card` with site name (maxLines=1, ellipsis) + `Canvas` triangle pointer; `Modifier.clickable { onSiteSelected(site) }`
+- Unmapped site count shown in `Alignment.BottomCenter` when any sites lack coords
+
+**SiteListScreen updates:**
+- `ViewMode` enum: `LIST` | `MAP`
+- `var viewMode by remember { mutableStateOf(ViewMode.LIST) }` — persists within session
+- List/map icon toggle buttons in `TopAppBar` trailing content; active button tinted `primary`, inactive `onSurfaceVariant`
+- MAP branch: `LaunchedEffect(Unit)` calls `onGeocodeUnresolved(sites)` once on first map open; renders `SiteMapView`
+- FAB hidden in MAP mode
+
+**Sync model update:**
+- `SiteSyncRequest` gains `latitude: Double?` and `longitude: Double?`
+- `Site.toSyncRequest()` passes coords through
+- Backend `SiteIn` Pydantic model updated to accept optional lat/lng (passed through `model_dump()`)
+
+**Mapbox SDK setup:**
+- `mapbox-maps = "11.12.0"` and `mapbox-compose = "11.12.0"` in `libs.versions.toml`
+- Private Mapbox Maven repo in `settings.gradle.kts` — requires `MAPBOX_DOWNLOADS_TOKEN=sk.*` in `~/.gradle/gradle.properties`
+- `MAPBOX_PUBLIC_TOKEN=pk.*` in `local.properties`, injected via `buildConfigField` and `manifestPlaceholders`
+- **Token fix:** manifest `<meta-data android:name="com.mapbox.token">` approach does not reliably supply the token to the Compose SDK at runtime. Fix: `MapboxOptions.accessToken = BuildConfig.MAPBOX_PUBLIC_TOKEN` in `TapLogApplication.onCreate()` before any map code runs. This is the correct pattern for all future Mapbox work.
+
+**OpenSpec:** Module 36 archived. Specs synced: `site-map-view` (new), `site-geocoding` (new), `org-site-sync` (updated with lat/lng).
+
+**Key lessons:**
+- The Mapbox manifest `<meta-data>` token injection is unreliable with the Compose extension in SDK v11. The SDK's own error message offers two options — option 2 (`MapboxOptions.accessToken` programmatic setter in Application.onCreate) is the correct one. Don't rely on manifest injection for Mapbox.
+- Geocoding should be non-blocking and non-fatal. Save the site to Room immediately; geocode in a background coroutine that optionally upserts coordinates. The inspector never waits. A failed geocode is not a failed save.
+- `ViewAnnotation` inside `MapboxMap` is the correct Compose SDK pattern for rendering UI at map coordinates. It participates in Compose state naturally — the same `Site` object drives both the list view and the map pin.
+- `LaunchedEffect(Unit)` for the one-time geocode trigger on first map open — not `LaunchedEffect(viewMode)` which would retrigger on every toggle back to map mode.
+- The manifest approach for SDK tokens is a common gotcha across multiple SDK vendors. When an SDK throws at init with an error about a missing token, check for both the manifest and a programmatic setter option. The programmatic setter is always more reliable.
+
+---
+
+## Module 39 — Dashboard shell
+
+**What we did:**
+Replaced `SiteListScreen` as the home screen with a purpose-built `DashboardScreen`. The app now opens to a summary view that gives inspectors immediate situational awareness before they enter a building.
+
+**ViewModel additions:**
+- `ScanState.Dashboard` added to sealed class; `loadOrganisation()`, `saveOrganisation()`, and `resetScanState()` all emit `Dashboard` as the home state
+- `DashboardStats` data class: `inspectionsThisMonth`, `openDeficiencies`, `overdueSiteCount`, `totalSites`
+- `SiteWithOverdueCount` data class: `site`, `overdueCount`, `mostOverdueDays`, `mostOverdueAssetName`
+- `dashboardStats: StateFlow<DashboardStats>` — combines `sitesForOrg`, `openDeficienciesWithAsset`, `activeAssets`, and `allInspections` flows; inspections this month computed by comparing `inspectedAt` to start-of-month epoch
+- `overdueSites: StateFlow<List<SiteWithOverdueCount>>` — groups overdue assets by `siteId`, builds `SiteWithOverdueCount` per site, sorted by `mostOverdueDays` descending
+- `showDashboard()` replaces `showSiteList()` as the primary home navigation call (both coexist)
+- `ScanState.SiteSelected` gains `fromSiteList: Boolean = false` — origin flag for back navigation
+
+**DashboardScreen.kt (new):**
+- `LazyColumn` root with `TopAppBar` showing org name
+- `StatsStrip` — `Row` of four `StatCard` composables (`TapLogNavy700` background, `TapLogTeal200` accent number, label beneath)
+- `QuickActionsSection` — full-width Scan `Button` (`TapLogTeal400`); secondary row with "Add Site" and "Deficiencies" `OutlinedButton`s
+- Overdue section — `SectionHeader` with error badge count; `SiteOverdueRow` per item (site name, overdue count badge, most overdue asset, days overdue); "All sites are current" empty state
+- Sites preview — up to 4 `SiteCard`s inline; "See all" `TextButton` navigates to full-screen `SiteListScreen`
+
+**Navigation fixes:**
+- Scan button on Dashboard routes to `SiteList` (not `resetScanState()`) — user picks a site before scanning
+- `SiteDetailScreen` back navigation is origin-aware: `fromSiteList = true` → back to `SiteList`; `fromSiteList = false` (default, from Dashboard) → back to `Dashboard`
+
+**SiteListScreen updates:**
+- `isEmbedded: Boolean = false` parameter — suppresses FAB when true
+- `onBack: (() -> Unit)?` — shows back arrow in TopAppBar when non-null
+
+**Validation:** Build passing, Dashboard loads as home after login, stats strip correct, "See all" → SiteList → back → Dashboard. Overdue section and overdue site row tap TBD pending real overdue data in the field.
+
+**Key lessons:**
+- A home screen built around situational awareness (what's overdue, what's urgent) is more useful to a field inspector than a plain list. The list is still there — it's just one tap away.
+- StateFlow `combine()` across multiple Room flows is the right pattern for derived dashboard stats — the result updates automatically when any source changes.
+- Origin-aware back navigation (`fromSiteList` flag on `ScanState.SiteSelected`) is the minimal solution when a detail screen is reachable from multiple parents. Avoid a shared "previous state" tracker — flag the destination, not the journey.
+- A Scan button that silently loops back to the same screen (because `resetScanState()` with no site = Dashboard) violates the principle of least surprise. Visible navigation beats invisible state mutation.
+
+---
+
+## Module 40 — Dashboard intelligence
+
+**What we did:**
+Added the three intelligence sections that turn the dashboard from a navigation portal into a professional briefing tool: a month calendar with inspection due date dots, a unified task list, and a searchable contacts list. All data derived from existing Room entities — no migrations, no backend changes.
+
+**New data classes and enums (EmberViewModel):**
+- `CalendarUrgency` enum: UPCOMING / DUE_SOON / OVERDUE
+- `CalendarEvent`: assetId, assetName, siteName, assetTypeCode, dueDate: LocalDate, urgency
+- `TaskType` enum: OPEN_DEFICIENCY / OVERDUE_ASSET
+- `Task`: id, type, title, siteName, severity?, daysOverdue?, createdAt
+- `SiteContact`: name, phone?, role, siteName, siteId
+
+**DAO addition:**
+- `AssetWithSite` JOIN result (non-entity): `@Embedded asset: Asset` + `@ColumnInfo siteName`
+- `AssetDao.getAssetsWithDueDates()` — JOIN with sites, filtered to `nextInspectionDue IS NOT NULL`
+- `EmberRepository.getAssetsWithDueDates()` wired through
+
+**ViewModel StateFlows:**
+- `calendarEvents: StateFlow<Map<LocalDate, List<CalendarEvent>>>` — derived from `getAssetsWithDueDates()`; urgency classified by comparing due date to today (OVERDUE: past, DUE_SOON: ≤7 days, UPCOMING: beyond); grouped by `LocalDate`
+- `tasks: StateFlow<List<Task>>` — combines `openDeficienciesWithAsset` + `activeAssets`; explicit `nextInspectionDue < now` filter on assets before mapping; sorted CRITICAL → HIGH → OVERDUE_ASSET (days desc) → MEDIUM → LOW; uses `buildingName` from `DeficiencyWithAsset` as site name (pre-existing JOIN field)
+- `allContacts: StateFlow<List<SiteContact>>` — derived from `sitesForOrg`; up to 2 contacts per site; deduplication by name+phone; alphabetical sort
+- `ScanState.Calendar`, `ScanState.Tasks`, `ScanState.Contacts` added; `showCalendar()`, `showTasks()`, `showContacts()`, `selectSiteById()` added
+
+**New screens:**
+- `CalendarScreen.kt` — `TopAppBar` + `LazyColumn`; `MonthCalendarGrid` composable (7-column grid, pure Compose); `DayCell` with urgency dots (up to 3 + overflow count); day-tap expansion showing `CalendarEventRow` list; month navigation via arrow `IconButton`s
+- `TasksScreen.kt` — `FilterChip` row (All · Deficiencies · Overdue); `TaskRow` composable (type icon, title, site, severity/days badge); "No open tasks ✓" empty state
+- `ContactsScreen.kt` — search `OutlinedTextField`; `ContactRow` (name, role chip, site name, `ACTION_DIAL` phone tap); tap row → `selectSiteById()`
+
+**DashboardScreen extensions:**
+- `CalendarSection`, `TasksSection`, `ContactsSection` appended to existing `LazyColumn`
+- `CalendarSection` has local `displayedMonth` + `selectedDay` state (month navigation works in preview too)
+- `.imePadding()` added to dashboard `LazyColumn` — keyboard from Contacts search no longer overlaps content below
+
+**Two bugs fixed post-build:**
+1. `CalendarSection` had no-op `onPrevMonth`/`onNextMonth` — added local state so arrows work on dashboard
+2. Keyboard covered task list — added `imePadding()` to dashboard `LazyColumn`
+
+**Key lessons:**
+- `DeficiencyWithAsset.buildingName` is the site name (sourced from `sites.name` via JOIN) — read existing JOIN results before adding new DAO queries. The field name is legacy but the data is correct.
+- Explicit `nextInspectionDue < now` filter must be in the ViewModel, not assumed. `activeAssets` is all non-retired assets — without the filter, every asset becomes a task.
+- A `Map<LocalDate, List<CalendarEvent>>` StateFlow gives O(1) day-cell lookup. Computing it once in the ViewModel and caching via `stateIn` is far better than filtering a list on every cell recomposition in a 30+ cell grid.
+- Preview sections in a scroll view need their own local state if they have interactive controls (month arrows). Passing no-op lambdas renders the controls but silently breaks them.
+- `imePadding()` belongs on the scrollable container, not the `Scaffold`. The `Scaffold` provides inset padding for system bars; `imePadding()` on the `LazyColumn` makes the keyboard push the scroll viewport without disrupting the `TopAppBar`.
+
+---
+
 ## What comes next (upcoming modules)
 
-**Immediate:** Complete Module 34 backend tasks (9.1–9.4) in `C:\dev\taplog-api`:
-- Add `licensed_verticals` to Organisation model
-- Create `verticals` MongoDB collection with Ember seed document
-- Implement `GET /api/v1/verticals` and `GET /api/v1/verticals/{code}`
+| # | What | Notes |
+|---|---|---|
+| **37** | Anchor config — MongoDB seed | Backend-only; context written ✅ |
+| **31** | Visual Asset Identification | Photo → Claude vision → `VerticalAssetType` suggestion → pre-selects picker; context written ✅ |
+| **32** | Pre-Inspection Checklist card | `ChecklistCard` composable in `InspectionFormScreen`; tap-to-check UX; `checklistItems` data already populated; context written ✅ |
+| **33** | AI co-pilot | Floating `?` FAB on `InspectionFormScreen` → `ModalBottomSheet` chat; system prompt generated from `VerticalConfig` + `VerticalAssetType` at runtime; context written ✅ |
+| **41** | Billing | Stripe web checkout, subscription gating on Organisation — before OAFC November 2026 |
 
-- **Module 31** — Visual Asset Identification: photo → AI suggests OFC asset type (depends on Module 30 ✅)
-- **Module 32** — Inspection guidance Level 2: collapsible contextual OFC guidance panel on InspectionFormScreen
-- **Module 33** — AI inspection co-pilot: OFC-aware, asset-context-aware, offline-cached Q&A
-- **Module 35** — Anchor config: add Anchor VerticalConfig to MongoDB (zero Android changes)
-- **Module 36** — Hatch config + EntryEventScreen implementation
-- **Billing** — Stripe web checkout, subscription gating on Organisation — before OAFC November 2026
+**Platform (deferred):**
+- **Module 38** — Hatch config + EntryEventScreen implementation (deferred; Anchor first)
+- **Onboarding v2** — Invite token model: join code on registration, V2 admin portal (browser-based)
 
 ---
 
@@ -733,7 +934,7 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 | VerticalConfigEntity | Room entity caching a VerticalConfig as a JSON blob in the vertical_configs table |
 | EmberVerticalConfig | Kotlin object with build() function — translates OFCCategory to VerticalConfig; used as cold-start fallback |
 | licensedVerticals | List<String> on Organisation — billing hook controlling which vertical configs the backend returns |
-| EntryEventScreen | Stub composable for MULTI_ROLE assets — placeholder for Hatch entry event flow (Module 36) |
+| EntryEventScreen | Stub composable for MULTI_ROLE assets — placeholder for Hatch entry event flow (Module 38) |
 | Inspection cardinality | The assumption that one NFC tap = one asset = one inspection form — wrong for Fleet, Hatch, Anchor batch. Open design doc. |
 | local.properties | Gitignored file at project root — safe place for secrets like API keys |
 | SyncResult | Sealed class with Success / Conflict / Failure — clean return type for sync operations |
@@ -763,13 +964,12 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 | pending_verifications | MongoDB collection storing 6-digit email codes with 15-minute TTL — used for account and device verification |
 | Resend | Transactional email service used for verification codes — generous free tier, simple Python SDK |
 | Bearer token | Authorization header format — `Authorization: Bearer <JWT>` — replaces API key on sync endpoints post-Module 28 |
-| Beachhead | The first vertical you launch — proves the model before expanding |
 | Corridor-first | Go-to-market strategy: own the Bancroft–Peterborough–Belleville corridor before expanding provincially |
 | Activation gap | The gap between downloading the app and completing a real first inspection — for TapLog, caused by lack of NFC tags |
 | OAFC | Ontario Association of Fire Chiefs — runs annual conference and trade show (November, Niagara Falls) |
 | Life safety cluster | Ember + Anchor + Hatch — the three highest-urgency regulated trade verticals, built in sequence |
 | Organisation | Top-level entity — the fire safety company using TapLog. Billing attaches here, not to the inspector. |
-| Site | A physical location belonging to an Organisation — has its own address, client name, and on-site contact. Replaces the old buildingName string. |
+| Site | A physical location belonging to an Organisation — has its own address, client name, on-site contact, and now lat/lng coords. |
 | Generic tracker displacement | The pattern where a field tool is replaced by a cloud-only generic asset tracker by non-field decision-makers — no offline, no NFC, no regulatory knowledge. TapLog's most reachable competitive target. |
 | Company tier | TapLog's $199/mo flat subscription — up to 15 inspectors, reporting dashboard. Primary revenue target for multi-inspector fire safety companies. |
 | InspectorClaims | Data class decoded from JWT payload on-device — inspectorId, name, email, certNumber, organisationId. Not stored in DataStore. |
@@ -786,6 +986,18 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 | ActivityResultContracts.RequestPermission | Result contract for requesting a single runtime permission — returns true if granted |
 | BitmapFactory.Options.inSampleSize | Power-of-2 downsampling factor for BitmapFactory.decodeFile — use 8 for 48dp thumbnails from camera photos |
 | photoPath | String? field on Deficiency — local file path to a captured photo. Path string syncs to backend; binary upload is a future enhancement |
+| Mapbox | Cloud mapping platform — provides maps, geocoding REST API, and the Android Compose SDK used for TapLog's site map view |
+| GeocodingRepository | Calls Mapbox Geocoding REST API v5 to resolve a site address to lat/lng coordinates; non-blocking, non-fatal |
+| SiteMapView | Compose composable rendering a MapboxMap with ViewAnnotation pins per geocoded site; includes SitePin label + triangle |
+| ViewAnnotation | Mapbox Compose SDK component for rendering Compose UI at a specific map coordinate — used for site name pins |
+| MapEffect | Mapbox Compose SDK side-effect for imperative map operations (e.g., loading a style on the MapView) |
+| MapboxOptions.accessToken | Programmatic Mapbox token setter — must be called in Application.onCreate() before any map code runs; manifest meta-data approach unreliable in SDK v11 |
+| ViewMode | Enum in SiteListScreen — LIST or MAP; controls which view is displayed; persists within the session |
+| MAPBOX_DOWNLOADS_TOKEN | Secret Mapbox token (sk.*) for downloading SDK from the private Mapbox Maven repo; set in ~/.gradle/gradle.properties, never committed |
+| TapLog brand palette | Navy (primary background/text), Teal (primary action/accent), Gray (neutral), semantic status, deficiency severity, vertical cluster colors — defined in Color.kt |
+| TapLogTheme | Material3 theme composable — applies brand palette to light and dark color schemes; wired in MainActivity |
+| Crossfade | Compose animation composable — used for 400ms fade between AppScreen.Splash and AppScreen.App in MainActivity |
+| Invite token model | Planned onboarding mechanism: org owner generates a join code, inspector uses it on registration to join the correct org account |
 
 ---
 
@@ -794,40 +1006,51 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 ### Android
 | File | Purpose |
 |---|---|
-| `ca.taplog.app/MainActivity.kt` | Entry point, NFC handling, EmberScanScreen, all state routing |
-| `ca.taplog.app/TapLogApplication.kt` | App singleton — all DAOs, repository, inspectorPreferences, syncRepository |
+| `ca.taplog.app/MainActivity.kt` | Entry point, NFC handling, auth gate, EmberScanScreen, Crossfade splash→app |
+| `ca.taplog.app/TapLogApplication.kt` | App singleton — all DAOs, repository, inspectorPreferences, syncRepository, geocodingRepository; MapboxOptions token set here |
 | `ca.taplog.app/SyncWorker.kt` | WorkManager CoroutineWorker — calls syncAll(), handles retry/success |
 | `ca.taplog.app/ConnectivityReceiver.kt` | BroadcastReceiver — triggers sync on connectivity restore |
-| `ca.taplog.app.data/EmberModels.kt` | Organisation, Site, Asset, Inspection, Deficiency, DeficiencyWithAsset, ScanEvent, TagEvent entities + all enums |
-| `ca.taplog.app.data/Converters.kt` | TypeConverters for all Room enums |
-| `ca.taplog.app.data/EmberDAO.kt` | OrganisationDao, SiteDao, AssetDao, InspectionDao, DeficiencyDao |
-| `ca.taplog.app.data/AppDatabase.kt` | Room singleton, version 6, migrations 2→3→4→5→6 |
+| `ca.taplog.app.data/EmberModels.kt` | Organisation, Site (+ lat/lng), Asset, Inspection, Deficiency, DeficiencyWithAsset, ScanEvent, TagEvent entities + all enums |
+| `ca.taplog.app.data/Converters.kt` | TypeConverters for all Room enums + List<String> |
+| `ca.taplog.app.data/EmberDAO.kt` | OrganisationDao, SiteDao, AssetDao, InspectionDao, DeficiencyDao, ScanEventDao, TagEventDao |
+| `ca.taplog.app.data/VerticalModels.kt` | Full vertical data model + VerticalRegistry singleton |
+| `ca.taplog.app.data/VerticalConfigDao.kt` | VerticalConfigEntity + VerticalConfigDao |
+| `ca.taplog.app.data/AppDatabase.kt` | Room singleton, version 9, migrations 2→3→4→5→6→7→8→9 |
 | `ca.taplog.app.data/EmberRepository.kt` | Data access layer including replaceTag() atomic transaction |
 | `ca.taplog.app.data/InspectorPreferences.kt` | DataStore: authToken, refreshToken, inspectorId, deviceId + decodeJwtClaims() + InspectorClaims |
 | `ca.taplog.app.data/AuthApiService.kt` | Retrofit interface for 6 auth endpoints + all auth models |
 | `ca.taplog.app.data/AuthInterceptor.kt` | Bearer injection + 401 refresh retry + clearAuth |
+| `ca.taplog.app.data/GeocodingRepository.kt` | Mapbox Geocoding REST API — address → lat/lng; non-blocking, non-fatal |
 | `ca.taplog.app.data/PdfReportGenerator.kt` | PdfDocument canvas renderer — A4 inspection report |
 | `ca.taplog.app.data/ReportRepository.kt` | PDF file generation + FileProvider URI |
 | `ca.taplog.app.ui.auth/AuthViewModel.kt` | Auth state machine |
 | `app/src/main/res/xml/file_paths.xml` | FileProvider path config — required for share sheet |
 | `ca.taplog.app.data/OFCAssetTypes.kt` | OFCCategory enum + OFCAssetType data class — all 35 OFC asset types with descriptions |
-| `ca.taplog.app.data/SyncModels.kt` | Wire-format request/response models + toSyncRequest() extensions |
+| `ca.taplog.app.data/SyncModels.kt` | Wire-format request/response models + toSyncRequest() extensions (incl. lat/lng on SiteSyncRequest) |
 | `ca.taplog.app.data/SyncResult.kt` | Sealed class — Success / Conflict / Failure sync result types |
 | `ca.taplog.app.data/RetrofitClient.kt` | Retrofit singleton with Gson naming policy and OkHttp logging |
-| `ca.taplog.app.data/TapLogApiService.kt` | Retrofit interface — three POST sync endpoints |
+| `ca.taplog.app.data/TapLogApiService.kt` | Retrofit interface — verticals GETs + sync POSTs |
 | `ca.taplog.app.data/SyncRepository.kt` | Per-record and batch sync methods, 409 handling |
-| `ca.taplog.app.ui.ember/EmberViewModel.kt` | ScanState machine, org/site/asset context, all Ember business logic |
+| `ca.taplog.app.ui.ember/EmberViewModel.kt` | ScanState machine, DashboardStats + SiteWithOverdueCount StateFlows, org/site/asset context, all Ember business logic, geocodeUnresolvedSites() |
+| `ca.taplog.app.ui.ember/DashboardScreen.kt` | Home screen — StatsStrip, QuickActionsSection, overdue sites, site preview, CalendarSection, TasksSection, ContactsSection |
+| `ca.taplog.app.ui.ember/CalendarScreen.kt` | Full-screen month calendar — urgency dots, day-tap expansion, month navigation |
+| `ca.taplog.app.ui.ember/TasksScreen.kt` | Unified task list — open deficiencies + overdue assets; FilterChip row |
+| `ca.taplog.app.ui.ember/ContactsScreen.kt` | Aggregated site contacts — search, tap-to-dial, row → SiteDetailScreen |
 | `ca.taplog.app.ui.ember/OrganisationSetupScreen.kt` | First launch org creation |
-| `ca.taplog.app.ui.ember/SiteListScreen.kt` | Dashboard — site list with overdue counts |
+| `ca.taplog.app.ui.ember/SiteListScreen.kt` | Full-screen site list (from Dashboard "See all") — list/map toggle, lazy geocoding |
+| `ca.taplog.app.ui.ember/SiteMapView.kt` | MapboxMap composable + ViewAnnotation site pins + SitePin |
 | `ca.taplog.app.ui.ember/SiteDetailScreen.kt` | Site detail + asset list + stats chips |
 | `ca.taplog.app.ui.ember/SiteRegistrationScreen.kt` | Add new site |
 | `ca.taplog.app.ui.ember/AssetRegistrationScreen.kt` | Register new NFC tag — OFC picker, auto inspection interval, site context |
 | `ca.taplog.app.ui.ember/AssetDetailScreen.kt` | Asset info + inspection history, source-aware back navigation |
 | `ca.taplog.app.ui.ember/AssetTypePickerDialog.kt` | OFC asset type picker — search, category chips, descriptions |
 | `ca.taplog.app.ui.ember/AssetListScreen.kt` | Browse all assets, overdue highlighting |
-| `ca.taplog.app.ui.ember/InspectionFormScreen.kt` | Inspection form + deficiency dialog |
+| `ca.taplog.app.ui.ember/InspectionFormScreen.kt` | Inspection form + deficiency dialog — field-driven via VerticalConfig |
 | `ca.taplog.app.ui.ember/OpenDeficienciesScreen.kt` | All open deficiencies, mark resolved |
-| `ca.taplog.app.ui.ember/SplashScreen.kt` | Launch splash — fade in/out |
+| `ca.taplog.app.ui.ember/SplashScreen.kt` | Option A brand lockup: Canvas icon, animated entrance, tap-to-continue gate |
+| `ca.taplog.app.ui.theme/Color.kt` | Full TapLog brand palette |
+| `ca.taplog.app.ui.theme/Theme.kt` | TapLogTheme: Material3 light + dark color schemes |
+| `ca.taplog.app.ui.theme/Type.kt` | TapLogTypography |
 | `app/src/main/AndroidManifest.xml` | NFC permissions, windowSoftInputMode, ConnectivityReceiver, app config |
 | `app/build.gradle.kts` | App-level dependencies, KSP config, BuildConfig fields |
 | `gradle/libs.versions.toml` | Version catalog |
@@ -837,10 +1060,13 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 |---|---|
 | `app/main.py` | FastAPI app entry point, lifespan, router registration |
 | `app/database.py` | Motor client, Settings, connect/close/get_db |
-| `app/models.py` | All Pydantic request/response models and enums |
+| `app/models.py` | All Pydantic request/response models and enums (SiteIn includes lat/lng) |
 | `app/routers/assets.py` | POST /api/v1/assets |
 | `app/routers/inspections.py` | POST /api/v1/inspections |
 | `app/routers/deficiencies.py` | POST /api/v1/deficiencies |
+| `app/routers/sites.py` | POST /api/v1/sites (accepts lat/lng) |
+| `app/routers/organisations.py` | POST /api/v1/organisations |
+| `app/routers/verticals.py` | GET /api/v1/verticals, GET /api/v1/verticals/{code} |
 | `Procfile` | Railway start command |
 | `pyproject.toml` | uv-compatible dependency spec |
 | `requirements.txt` | Railpack pip install trigger |
@@ -856,6 +1082,8 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 | `taplog-md-prime-directives.md` | Session workflow rules — source of truth for AGENTS.md |
 | `.claude/AGENTS.md` | Auto-read by Claude Code — copy of prime directives |
 | `openspec/config.yaml` | OpenSpec configuration |
+| `openspec/module-34-context.md` | Architectural context for vertical engine (reference) |
+| `openspec/module-36-context.md` | Architectural context for site map / Mapbox (reference) |
 
 ---
 
@@ -868,3 +1096,7 @@ The propose-then-amend pattern was demonstrated this session. After `/opsx:propo
 *Session 7 complete — Full strategy session: life safety verticals matrix, go-to-market, pricing, competitive depth, proof of presence security model, tag economics, tag lifecycle (LB-005), regulatory tailwind (2026 OFC amendments), data asset framing, inspection guidance roadmap / AI co-pilot concept (LB-006), Module 28 promoted to authenticated identity, pilot user added as Ember champion*
 *Session 8 complete — Module 27a: Organisation + Site entity hierarchy, Room v2→v3 migration, SiteListScreen dashboard, SiteDetailScreen, SiteRegistrationScreen, OrganisationSetupScreen, SplashScreen, AssetRegistrationScreen/AssetDetailScreen/InspectionFormScreen updated, full hierarchy verified on device. Strategy: company-over-individual, dashboard reframe, generic tracker displacement pattern identified, vertical-specific UI confirmed*
 *Session 9 complete — Modules 27, 28, 29, 30: tamper-evident scan log + tag lifecycle + OFC checklists (Room v4), full authenticated identity with JWT + device registration + org/site sync (Room v5→v6, TapLogVertical), PDF report generation with FileProvider share sheet, photo capture for deficiencies. Full Ember v1 loop verified end-to-end on device. bcrypt/passlib fix, Resend domain workaround, sync trigger fix (TapLogApplication.onCreate). Next: Module 31 — Visual Asset Identification*
+*Session 10 complete — Module 34: vertical engine (VerticalConfig/VerticalRegistry, field-driven InspectionFormScreen, Room v6→v7→v8, EntryEventScreen stub, licensedVerticals, EmberVerticalConfig cold-start fallback). Propose-then-amend pattern. ResultOption + TriggerConfig amendments before apply. inspection-cardinality.md open design doc.*
+*Session 11 complete — Module 34 backend (tasks 9.1–9.4: verticals endpoint + Ember seed in MongoDB). Module 35: full brand palette, Material3 light+dark themes, SplashScreen Option A brand lockup, Crossfade transition. Module 36: Mapbox site map — Room v8→v9 (lat/lng on Site), GeocodingRepository, SiteMapView + ViewAnnotation pins + SitePin, list/map toggle in SiteListScreen, Mapbox SDK v11.12.0, programmatic token fix. Onboarding governance discussion: invite token model, V2 admin portal. LB-012 (registration entry points), LB-013 (org membership count drives UI complexity). Next: Module 37 — Anchor config*
+*Session 12 complete — Module 39: DashboardScreen as home (ScanState.Dashboard), DashboardStats + SiteWithOverdueCount StateFlows, StatsStrip, QuickActionsSection, overdue section, site preview, origin-aware SiteSelected back navigation (fromSiteList flag), two UX bugs fixed (Scan button routing, Go Back navigation). Build passing, core validation complete. Next: Module 40 — Dashboard intelligence*
+*Session 13 complete — Module 40: CalendarSection (pure-Compose month grid, urgency dots, local state for month navigation), TasksSection (unified deficiencies + overdue assets, explicit nextInspectionDue < now filter, priority sort), ContactsSection (site contacts aggregated in ViewModel, search, tap-to-dial), three full-screen screens (CalendarScreen, TasksScreen, ContactsScreen), AssetWithSite DAO JOIN, imePadding() fix on dashboard LazyColumn. All validation passing. New tangent next.*

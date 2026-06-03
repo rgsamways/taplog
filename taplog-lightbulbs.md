@@ -52,30 +52,28 @@
 
 ---
 
-## LB-006 — The inspection form is a moment of professional uncertainty
+## LB-006 — The inspection guidance gap is a product, not a feature
 **Module:** Strategy session (Session 7)
-**Trigger:** Discussing how difficult it is for tradespeople to access, parse, and retain Ontario regulatory requirements. The question arose: what happens when an inspector is standing in front of an unfamiliar asset in a basement mechanical room with no signal, trying to remember what the OFC requires?
-**Insight:** The inspection form is not just a data entry screen. It is a moment of professional uncertainty — the inspector knows their trade but may not remember the specific code requirement for this asset type, this interval, this deficiency severity. Right now they call a colleague, guess, or skip it. That moment of uncertainty is the most important moment TapLog can own. The app that resolves uncertainty at the point of inspection owns the relationship with the inspector in a way that passive record-keeping software never can.
-**What we did:** Identified a four-level guidance roadmap: (1) `checklistItems` per OFCAssetType — what to inspect, displayed pre-form, no connectivity required; (2) collapsible contextual guidance panel on the inspection form — plain-language OFC interpretation per asset type; (3) in-app AI assistant — OFC-aware, asset-context-aware, offline-cached answers to common questions; (4) pre-inspection building briefing — overdue assets, open deficiencies, OFC changes since last visit. Level 1 is a data addition, deliverable in Module 27. Level 3 is the defensible moat.
-**What's next:** Add `checklistItems: List<String>` to `OFCAssetType` in Module 27. Design the AI assistant architecture post-Module 31 when the core is stable — system prompt loaded with OFC knowledge and current asset context, plain-language responses, offline cache of common Q&A per asset type.
-**Broader principle:** The highest-value moment to help a user is the moment of uncertainty, not after the fact. A tool that is present and useful at the moment of doubt earns loyalty that a reporting dashboard never will. Build for the basement, not the boardroom.
+**Trigger:** Discussing what happens after the OFC checklist is displayed — does TapLog just show the steps, or does it help the inspector understand what they're looking at?
+**Insight:** Showing a checklist is table stakes. The gap is interpretive: a newer inspector standing in front of a dry chemical extinguisher knows the checklist says "check pressure gauge" but may not know what a green zone reading looks like, what a slow leak pattern means, or when a gauge reading requires immediate removal from service vs. a note. That interpretive layer — the knowledge an experienced inspector carries in their head — is not in any app today. It is also exactly what a well-prompted AI model can surface, per asset type, per checklist item, on demand.
+**What we did:** Named the concept **AI co-pilot** — a module that adds contextual guidance to the inspection form. Per-item "What am I looking for?" prompts, severity guidance, and deficiency language suggestions. Flagged as Module 33. Positioned as a premium tier differentiator, not a free feature.
+**Broader principle:** The most valuable product additions are the ones that transfer expert knowledge to non-experts at the moment it's needed. A checklist tells you what to do. A co-pilot tells you what it means.
 
 ---
 
-## LB-007 — The real customer had their good tool taken away
-**Module:** Module 27a — Organisation + Site hierarchy (Session 8)
-**Trigger:** Learning the backstory of TapLog's Ember pilot contact. A 30-year veteran fire safety inspector whose company switched from a purpose-built offline tool to a cloud-only generic asset tracker after a leadership change. The new tool has no offline capability, no NFC, no OFC knowledge. The inspector now manually bridges two systems to do his job. The switch was made by decision-makers who don't do the work.
-**Insight:** The most motivated early adopter is not someone discovering a new capability — it's someone whose existing capability was taken away by people who didn't understand it. This inspector already knows what good looks like. He doesn't need to be convinced that offline-first matters, or that NFC proves presence, or that OFC intervals shouldn't be manually entered. He lived all of that. TapLog isn't selling him something new — it's giving him back something he lost.
-**What we did:** Reframed the go-to-market target. The primary market segment is not "fire safety inspectors who want to go digital" — it's "fire safety companies whose field tool was replaced by a cloud-only generic tracker by non-field decision-makers." This segment is reachable, motivated, and already has budget allocated (they're paying for the inferior tool). Updated competitive positioning to include a direct attack angle against generic trackers.
-**Research finding:** The specific class of generic tracker TapLog displaces has a documented profile: cloud-only (no offline), QR/barcode-only (no NFC, no proof of physical presence), no regulatory intelligence (no OFC intervals, no trade-specific knowledge), freemium pricing that surprises users as data grows, and mobile app functionality rated as "restricted and unreliable" in user reviews. The tool looks good in a browser demo. It fails in a basement mechanical room.
-**Broader principle:** When a product decision is made by people who don't use the product, the people who do use it become a reachable market. Look for software categories where the buyer and the user are different people with different priorities. The buyer optimized for the demo; the user optimizes for the basement.
+## LB-007 — The dashboard is a company tool, not an inspector tool
+**Module:** Strategy session (Session 8)
+**Trigger:** Designing `SiteListScreen` as the home screen. The question arose: whose view is this — the individual inspector or the company owner?
+**Insight:** A solo inspector and a company owner with 10 field staff need fundamentally different home screens. The solo inspector wants "what am I doing today." The company owner wants "what is my company's coverage status." Building the dashboard for the inspector produces a screen that's useless to the buyer. Building it for the company owner produces a screen the inspector finds confusing. The correct answer is: the dashboard is a company tool by default, and the company owner is the person who actually decides to buy TapLog.
+**What we did:** Reframed `SiteListScreen` as an org-level site dashboard, not a personal task list. Sites are org assets; the inspector's job is to service them. Added site-level stats (asset count, overdue count) to each site card. The company owner can see coverage at a glance; the inspector uses it as a jump-off point.
+**Broader principle:** Design for the buyer's view, not the user's view. In B2B tools, the person who pays and the person who taps are often different people. Build the home screen for the person who signs the cheque.
 
 ---
 
-## LB-008 — A trigger that's never called is the same as a feature that doesn't exist
+## LB-008 — Refactoring erases startup side effects
 **Module:** Module 28 — Authenticated identity (Session 9)
-**Trigger:** After verifying auth, org, site, and inspection all worked on device, sync produced no records in MongoDB. No errors in Railway logs. No data arriving. Backend was healthy, app was healthy, sync was simply never running.
-**Insight:** The `TapLogApplication` class was rewritten during Module 28's auth refactor. The original version had no `onCreate()` — sync was only triggered by `ConnectivityReceiver`. When the auth rewrite added the new class structure, the connectivity receiver trigger remained, but it only fires on network state *changes*. On a device that's been connected the whole time, there's no change, no receiver, no sync. The fix was one line — `scheduleSyncIfNeeded(this)` in `TapLogApplication.onCreate()`. A perfectly correct sync implementation sitting dormant because the entry point was missing.
+**Trigger:** After refactoring `TapLogApplication` to add repository wiring, background sync stopped firing on app launch.
+**Insight:** The original `TapLogApplication.onCreate()` called `scheduleSyncIfNeeded(this)`. The refactored version didn't — it was a clean rewrite focused on adding the new repository wiring, and the sync call was simply not carried over. The app built without errors because `scheduleSyncIfNeeded` is a standalone function with no callers enforced by the compiler.
 **What we did:** Added `override fun onCreate() { super.onCreate(); scheduleSyncIfNeeded(this) }` to `TapLogApplication`. Sync fires on every app launch now.
 **What made this hard to debug:** `ExistingWorkPolicy.KEEP` meant the airplane-mode trick only worked once. After the first toggle, WorkManager held onto the (non-existent) queued work and ignored subsequent triggers. The Background Task Inspector in Android Studio would have shown the work was never enqueued — the right diagnostic tool for WorkManager issues.
 **Broader principle:** When you rewrite a class that has startup side effects, audit every effect that was in the old class. Refactoring is a context switch — the code that disappears from one file often needs to reappear in another. The compiler can't catch missing `onCreate()` calls; only a full-flow test can.
@@ -106,6 +104,59 @@
 **Insight:** An AI that reads the repo cold will build from what's there. If the architectural intent for a module lives only in a chat session or a person's head, the AI has no way to distinguish "add a fire pump type" from "build a multi-vertical engine." A single markdown file dropped into `openspec/` with the strategic context for an upcoming module costs 15 minutes to write and eliminates an entire category of propose/apply do-overs.
 **What we did:** Added `openspec/module-34-context.md` with full architectural intent: what the module is, key decisions, data structures, vertical catalogue, scope boundary, and what doesn't change. The next propose read it, produced the right proposal on the first run.
 **Broader principle:** The gap between "what you intend to build" and "what the AI will propose" is exactly equal to the gap between what's in the repo and what's in your head. Close that gap with files, not prompts. Files persist across sessions, team members, and tool switches. Prompts don't.
+
+---
+
+## LB-012 — Registration entry points define org structure
+**Module:** Session 11 — Onboarding governance discussion
+**Trigger:** Designing the invitation / join flow for multi-inspector companies. Who creates the org? How does inspector 2–15 join an existing company account rather than accidentally creating a new one?
+**Insight:** The registration form is effectively the org creation form. If every inspector who downloads the app registers independently, you get N orphaned solo orgs instead of one company account. The company owner needs to control org membership — which means the invite-token model: owner creates the org, generates a join code, shares it with their team. The inspector's registration screen accepts a join code. Without a join code, the account is solo by default. The token routes new inspectors into the right org before a single record is created.
+**What we discussed:** V1 can use a simple 6-character join code on the registration screen. The V2 admin portal — browser-based, not in the inspector app — gives the org owner an interface to generate codes, see which inspectors have joined, manage billing seats, and view org-wide coverage. This is a distinct product surface that doesn't belong in the inspector app.
+**Broader principle:** The registration entry point encodes your assumptions about who the customer is. Designing registration for individuals produces individual accounts. Designing it for companies — with an opt-in join mechanism — produces org-level accounts from day one. Build the revenue unit into the entry point.
+
+---
+
+## LB-013 — Org membership count is the UI complexity dial
+**Module:** Session 11 — Onboarding governance discussion
+**Trigger:** Looking at `SiteListScreen`, which shows all sites for the org. With one inspector, that's fine — there's only one person's work to show. With 10 inspectors sharing an org, the site list is a shared pool and the UI has no mechanism to show inspector assignment, filter by responsible inspector, or surface a per-inspector workload view.
+**Insight:** The current UI implicitly assumes `org.inspectorCount == 1`. The site list, the asset list, the open deficiencies view — all show org-level data because there's only one inspector to show it for. When the company tier becomes the primary revenue unit, this assumption breaks. "Whose sites are these?" becomes a meaningful question. Multi-inspector UI is not a feature increment on single-inspector UI — it requires a different information architecture. But building that architecture speculatively, before the company tier has a single paying customer, is waste.
+**What we discussed:** Keep V1 with the single-inspector-per-org mental model. When the company tier activates, gate UI complexity behind `org.inspectorCount > 1` — show the simple view by default, unlock the complex view when the data signals it's needed.
+**Broader principle:** Premature multi-tenancy UI is expensive. Build for the smallest viable customer and let the data dial up complexity progressively. An org inspector count is the right signal — it reflects actual usage, not a pricing tier flag that can be gamed.
+
+---
+
+## LB-014 — Vertical bundles are industry fluency, not feature lists
+**Module:** Strategy session (Session 13)
+**Trigger:** Observing that mining operations need multiple verticals (Ember, Anchor, Hatch, plus future mining-specific types) and that no single vertical captures the industry.
+**Insight:** A mine safety manager doesn't want to evaluate whether TapLog's fall protection vertical covers their regulatory requirements — they want a product that speaks their language out of the box. Packaging verticals into named, branded bundles sells industry fluency rather than feature lists. The buyer recognizes themselves in the product name before they read a single feature.
+**What we discussed:** A `VerticalBundle` — a named collection of `TapLogVertical` enums with a display name, industry tag, and billing SKU. Org onboarding presents bundles first; individual vertical selection is available as "custom." Bundle naming uses the industry's own vocabulary, not TapLog's internal vertical names. First named bundle: **TapLog Adit** (mining) — Ember + Anchor + Hatch as the core life safety cluster for underground operations. Name chosen for industry recognition (an adit is a horizontal mine entry tunnel), no common-language baggage, and a latent product metaphor: an adit is how you get into the mine; TapLog Adit is how you get into compliance.
+**Broader principle:** Buyers don't buy components — they buy recognition. A product that reflects a buyer's industry back at them closes faster than one that requires them to assemble the right combination themselves. Bundling is a sales motion disguised as a packaging decision.
+
+---
+
+## LB-015 — Inspectors know what they found; they need help saying it
+**Module:** Strategy session (Session 13)
+**Trigger:** Observing that field inspectors often write vague pass/fail notes — not because they don't understand the finding, but because precise regulatory language doesn't come naturally under field conditions.
+**Insight:** "Pressure low, needs service" and "gauge reading 150 PSI against CAN/ULC-S536:19 minimum of 175 PSI — 14% below threshold, remove from service pending recharge" describe the same finding. Only one is defensible in an investigation, credible to a building manager, or useful to an insurer. The inspector knew the finding; they just didn't have the language at their fingertips in a mechanical room with gloves on. This applies equally to pass notes — "all good" and "all 12 extinguishers within CAN/ULC-S536:19 operating range, pins and seals intact, no corrosion observed" are the same outcome with very different evidentiary weight.
+**What we discussed:** A hybrid interaction model inside the deficiency dialog and pass notes field: (1) offline chip row — pre-built per asset type: `[Code Reference]` `[Threshold]` `[Action Required]` `[Severity]` — tap to append a structured clause instantly, no AI call, works underground; (2) a single "Improve this" button that takes the full notes field and returns polished, code-referenced language in one AI call. Chips handle the 80% case with zero latency. Polish handles the inspector who wants professional output without thinking about it.
+**Reframe:** This is not about making failures sound better — it's about making every finding speak the language of the standard, regardless of outcome. A detailed pass record is as valuable as a deficiency record in a post-incident investigation or insurance claim.
+**Relationship to LB-006:** The AI co-pilot (LB-006) helps inspectors understand what they're looking at. This feature helps them communicate what they found. Same session, different moment — guidance before the form, language after.
+**What to call it:** TBD — lives inside the inspection form and deficiency dialog, possibly as a named capability within the co-pilot module (Module 33) or as a distinct sub-feature.
+**Broader principle:** The value of an inspection record is not just its accuracy — it's its authority. A finding that references the standard, cites the threshold, and uses the code's own language is unchallengeable. Tools that help non-writers produce authoritative records create compounding value: better records → more credible reports → more defensible inspectors → stronger TapLog data layer.
+
+## LB-032 — Farpost is a template, not a product
+**Module:** Strategy session (Session 13)
+**Trigger:** Asking whether Farpost's architecture could be replicated to build four other downstream applications that consume TapLog records.
+**Insight:** Farpost isn't an insurance claims app. It's a record consumption and decision surfacing engine. The insurance workflow is the first skin on top of that engine. The engine itself is four steps: (1) Ingest — consume verified records from TapLog keyed by a common identifier; (2) Match — when a trigger event occurs, look up all relevant records for that identifier; (3) Surface — present matched records in the context of the decision the professional needs to make; (4) Act — professional makes a better decision, logs the outcome, which becomes a record for the next downstream application. That engine is Farpost. It's also every other application in the family.
+**The five applications:**
+- **Farpost** — insurance claims dispatch. Trigger: claim filed. Professional: adjuster. Decision: liability and settlement.
+- **Permit** — construction draw management. Trigger: draw requested. Professional: construction lender. Decision: release funds.
+- **Roster** — workforce certification. Trigger: worker checks in. Professional: site safety manager. Decision: authorize site access.
+- **Ledger** — property compliance history. Trigger: due diligence / title transfer. Professional: real estate lawyer or lender. Decision: approve transaction.
+- **Signal** — portfolio risk scoring. Trigger: policy renewal or underwriting. Professional: commercial property insurer. Decision: price the risk.
+**The platform:** The shared engine — ingest, match, surface, act — is the template. Each application shares the ingest layer, matching engine, and sync infrastructure. What changes per app is the domain model, the trigger events, and the UI skin.
+**Investor framing:** TapLog generates the records. The Farpost platform family consumes them. The founder owns both ends of the pipe.
+**Broader principle:** When you find yourself building the same engine twice, you've accidentally invented a platform. Name it, abstract it, and build the second and third applications on top of it rather than beside it. The moat isn't any one application — it's the engine underneath all of them.
 
 ---
 

@@ -4,10 +4,12 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import ca.taplog.app.data.AiRepository
 import ca.taplog.app.data.AppDatabase
 import ca.taplog.app.data.AuthInterceptor
 import ca.taplog.app.data.EmberRepository
 import ca.taplog.app.data.EmberVerticalConfig
+import ca.taplog.app.data.GeocodingRepository
 import ca.taplog.app.data.InspectorPreferences
 import ca.taplog.app.data.RetrofitClient
 import ca.taplog.app.data.ReportRepository
@@ -24,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.mapbox.common.MapboxOptions
 
 class TapLogApplication : Application() {
 
@@ -35,6 +38,10 @@ class TapLogApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Set Mapbox token programmatically
+        MapboxOptions.accessToken = BuildConfig.MAPBOX_PUBLIC_TOKEN
+
         scheduleSyncIfNeeded(this)
         initVerticalRegistry()
     }
@@ -124,6 +131,10 @@ class TapLogApplication : Application() {
     }
 
     val reportRepository by lazy { ReportRepository(this) }
+
+    val geocodingRepository by lazy { GeocodingRepository(BuildConfig.MAPBOX_PUBLIC_TOKEN) }
+
+    val aiRepository by lazy { AiRepository() }
 
     val authViewModelFactory: ViewModelProvider.Factory by lazy {
         object : ViewModelProvider.Factory {

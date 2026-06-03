@@ -30,6 +30,8 @@ data class SiteSyncRequest(
     val contactPhone: String?,
     val notes: String?,
     val isActive: Boolean,
+    val latitude: Double?,
+    val longitude: Double?,
     val createdAt: Long
 )
 
@@ -126,6 +128,8 @@ fun Site.toSyncRequest() = SiteSyncRequest(
     contactPhone = contactPhone,
     notes = notes,
     isActive = isActive,
+    latitude = latitude,
+    longitude = longitude,
     createdAt = createdAt
 )
 

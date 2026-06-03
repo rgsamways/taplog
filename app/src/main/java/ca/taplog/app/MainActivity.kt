@@ -12,9 +12,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -31,6 +34,15 @@ import ca.taplog.app.data.VerticalRegistry
 import ca.taplog.app.ui.ember.AssetDetailScreen
 import ca.taplog.app.ui.ember.AssetListScreen
 import ca.taplog.app.ui.ember.AssetRegistrationScreen
+import ca.taplog.app.ui.ember.CalendarScreen
+import ca.taplog.app.ui.ember.ContactsScreen
+import ca.taplog.app.data.UserRole
+import ca.taplog.app.ui.ember.DashboardScreen
+import ca.taplog.app.ui.ember.FieldAnalystDashboardScreen
+import ca.taplog.app.ui.ember.FieldAnalystScanScreen
+import ca.taplog.app.ui.ember.QuickRegisterSheet
+import ca.taplog.app.ui.ember.RoleSelectionScreen
+import ca.taplog.app.ui.ember.TasksScreen
 import ca.taplog.app.ui.ember.EmberViewModel
 import ca.taplog.app.ui.ember.EntryEventScreen
 import ca.taplog.app.ui.ember.InspectionFormScreen
@@ -40,7 +52,15 @@ import ca.taplog.app.ui.ember.SiteDetailScreen
 import ca.taplog.app.ui.ember.SiteListScreen
 import ca.taplog.app.ui.ember.SiteRegistrationScreen
 import ca.taplog.app.ui.ember.SplashScreen
+import ca.taplog.app.ui.ember.UnregisteredTagScreen
+import ca.taplog.app.ui.ember.VisitSetupScreen
 import ca.taplog.app.ui.theme.TapLogTheme
+
+// Sealed class to drive the top-level screen slot
+private sealed class AppScreen {
+    object Splash : AppScreen()
+    object App    : AppScreen()
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -48,7 +68,7 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: EmberViewModel by viewModels {
         val app = application as TapLogApplication
-        EmberViewModel.Factory(app.repository, app.inspectorPreferences, app.reportRepository)
+        EmberViewModel.Factory(app.repository, app.inspectorPreferences, app.reportRepository, app.geocodingRepository, app.aiRepository)
     }
 
     private val authViewModel: AuthViewModel by viewModels {
@@ -72,37 +92,71 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val app = application as TapLogApplication
-                    var showSplash by remember { mutableStateOf(true) }
+                    var screen by remember { mutableStateOf<AppScreen>(AppScreen.Splash) }
                     var isAuthenticated by remember { mutableStateOf<Boolean?>(null) }
                     val registryReady by app.verticalRegistryReady.collectAsState()
+                    val userRole by viewModel.userRole.collectAsState()
+                    // null = not yet checked, true = role is set, false = needs selection
+                    var userRoleChecked by remember { mutableStateOf(false) }
+                    var needsRoleSelection by remember { mutableStateOf(false) }
 
                     LaunchedEffect(Unit) {
                         val token = app.inspectorPreferences.getAuthToken()
                         isAuthenticated = !token.isNullOrBlank()
+                        val hasStoredRole = app.inspectorPreferences.isUserRoleSet.first()
+                        needsRoleSelection = !hasStoredRole
+                        userRoleChecked = true
                     }
 
-                    if (showSplash) {
-                        SplashScreen(
-                            registryReady = registryReady,
-                            onSplashComplete = { showSplash = false }
-                        )
-                    } else when (isAuthenticated) {
-                        null -> Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) { CircularProgressIndicator() }
-
-                        false -> AuthFlow(
-                            authViewModel = authViewModel,
-                            onAuthenticated = {
-                                isAuthenticated = true
-                                viewModel.loadOrganisation()
+                    // Crossfade between Splash and App — 400ms fade, no flash
+                    Crossfade(
+                        targetState = screen,
+                        animationSpec = tween(durationMillis = 400),
+                        label = "splash_to_app"
+                    ) { currentScreen ->
+                        when (currentScreen) {
+                            is AppScreen.Splash -> {
+                                SplashScreen(
+                                    registryReady = registryReady,
+                                    onSplashComplete = { screen = AppScreen.App }
+                                )
                             }
-                        )
+                            is AppScreen.App -> {
+                                when (isAuthenticated) {
+                                    null -> Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) { CircularProgressIndicator() }
 
-                        true -> {
-                            LaunchedEffect(Unit) { viewModel.loadOrganisation() }
-                            EmberScanScreen(viewModel)
+                                    false -> AuthFlow(
+                                        authViewModel = authViewModel,
+                                        onAuthenticated = {
+                                            isAuthenticated = true
+                                            viewModel.loadOrganisation()
+                                        }
+                                    )
+
+                                    true -> {
+                                        LaunchedEffect(Unit) { viewModel.loadOrganisation() }
+                                        if (userRoleChecked && needsRoleSelection) {
+                                            RoleSelectionScreen(
+                                                onSelectInspector = {
+                                                    viewModel.setUserRole(UserRole.INSPECTOR)
+                                                    needsRoleSelection = false
+                                                    viewModel.loadOrganisation(forceRole = UserRole.INSPECTOR)
+                                                },
+                                                onSelectFieldAnalyst = {
+                                                    viewModel.setUserRole(UserRole.FIELD_ANALYST)
+                                                    needsRoleSelection = false
+                                                    viewModel.loadOrganisation(forceRole = UserRole.FIELD_ANALYST)
+                                                }
+                                            )
+                                        } else {
+                                            EmberScanScreen(viewModel)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -194,7 +248,6 @@ fun AuthFlow(authViewModel: AuthViewModel, onAuthenticated: () -> Unit) {
         }
 
         is AuthViewModel.AuthState.Authenticated -> {
-            // Handled by LaunchedEffect above — show nothing while transitioning
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
@@ -222,6 +275,18 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
     val organisation by viewModel.organisation.collectAsState()
     val currentSite by viewModel.currentSite.collectAsState()
     val siteAssets by viewModel.siteAssets.collectAsState()
+    val calendarEvents by viewModel.calendarEvents.collectAsState()
+    val tasks by viewModel.tasks.collectAsState()
+    val allContacts by viewModel.allContacts.collectAsState()
+    val userRole by viewModel.userRole.collectAsState()
+    val birthingTagEvent by viewModel.birthingTagEvent.collectAsState()
+    val activeVisitSiteId by viewModel.activeVisitSiteId.collectAsState()
+    val fieldAnalystAssetCount by viewModel.fieldAnalystAssetCount.collectAsState()
+
+    // QuickRegisterSheet state — shown as overlay on top of FieldAnalystScanScreen
+    var showQuickRegister by remember { mutableStateOf(false) }
+    var quickRegisterTagId by remember { mutableStateOf("") }
+    var quickRegisterIsManual by remember { mutableStateOf(false) }
 
     when (val state = scanState) {
 
@@ -229,6 +294,37 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
             OrganisationSetupScreen(
                 onSave = { name, city, province ->
                     viewModel.saveOrganisation(name, city, province)
+                }
+            )
+        }
+
+        is EmberViewModel.ScanState.Dashboard -> {
+            val dashboardStats by viewModel.dashboardStats.collectAsState()
+            val overdueSites by viewModel.overdueSites.collectAsState()
+            val orgId = organisation?.id
+            val sitesFlow = if (orgId != null) viewModel.getSitesForOrg() else null
+
+            DashboardScreen(
+                organisationName = organisation?.name ?: "",
+                dashboardStats = dashboardStats,
+                overdueSites = overdueSites,
+                sitesFlow = sitesFlow,
+                calendarEvents = calendarEvents,
+                tasks = tasks,
+                contacts = allContacts,
+                onScan = { viewModel.showSiteList() },
+                onAddSite = { viewModel.showAddSite() },
+                onShowDeficiencies = { viewModel.showOpenDeficiencies() },
+                onSiteSelected = { viewModel.selectSite(it) },
+                onOverdueSiteTapped = { viewModel.selectSite(it) },
+                onShowAllSites = { viewModel.showSiteList() },
+                onGeocodeUnresolved = { viewModel.geocodeUnresolvedSites(it) },
+                onShowCalendar = { viewModel.showCalendar() },
+                onShowTasks = { viewModel.showTasks() },
+                onShowContacts = { viewModel.showContacts() },
+                onAssetSelected = { assetId ->
+                    val asset = activeAssets.find { it.id == assetId }
+                    if (asset != null) viewModel.selectAsset(asset)
                 }
             )
         }
@@ -241,9 +337,11 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                 sitesFlow = sitesFlow,
                 organisationName = organisation?.name ?: "",
                 deficiencyCount = deficiencies.size,
-                onSiteSelected = { viewModel.selectSite(it) },
+                onSiteSelected = { viewModel.selectSite(it, fromSiteList = true) },
                 onAddSite = { viewModel.showAddSite() },
-                onShowDeficiencies = { viewModel.showOpenDeficiencies() }
+                onShowDeficiencies = { viewModel.showOpenDeficiencies() },
+                onGeocodeUnresolved = { viewModel.geocodeUnresolvedSites(it) },
+                onBack = { viewModel.showDashboard() }
             )
         }
 
@@ -257,7 +355,10 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                 onAssetSelected = { viewModel.selectAsset(it) },
                 onStartScanning = { viewModel.resetScanState() },
                 onAddSite = { viewModel.showAddSite() },
-                onBack = { viewModel.showSiteList() }
+                onBack = {
+                    if (state.fromSiteList) viewModel.showSiteList()
+                    else viewModel.showDashboard()
+                }
             )
         }
 
@@ -292,11 +393,13 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
             LaunchedEffect(state.asset.id) {
                 viewModel.loadInspectionsForAsset(state.asset.id)
                 viewModel.loadScanEventsForAsset(state.asset.id)
+                viewModel.loadBirthingTagEvent(state.asset.id)
             }
             AssetDetailScreen(
                 asset = state.asset,
                 inspections = inspections,
                 scanEvents = scanEvents,
+                birthingTagEvent = birthingTagEvent,
                 siteName = currentSite?.name ?: "",
                 source = assetDetailSource,
                 onStartInspection = { viewModel.startInspection(state.asset) },
@@ -344,9 +447,11 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
         }
 
         is EmberViewModel.ScanState.AssetNotFound -> {
+            // Legacy fallback — should not be reached after migration to UnregisteredTag
             AssetRegistrationScreen(
                 nfcTagId = tagId ?: "",
                 siteName = currentSite?.name ?: "",
+                viewModel = viewModel,
                 onSave = { name, assetTypeCode, location, installDateMillis, intervalMonths ->
                     viewModel.saveAsset(
                         nfcTagId = tagId ?: "",
@@ -359,6 +464,98 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                 },
                 onCancel = { viewModel.resetScanState() }
             )
+        }
+
+        is EmberViewModel.ScanState.UnregisteredTag -> {
+            UnregisteredTagScreen(
+                tagId = state.tagId,
+                userRole = userRole,
+                onRegisterAsFieldAnalyst = { tid ->
+                    quickRegisterTagId = tid
+                    quickRegisterIsManual = false
+                    showQuickRegister = true
+                },
+                onRegisterAsInspector = { viewModel.resetScanState() },
+                onDismiss = { viewModel.resetScanState() }
+            )
+            if (showQuickRegister && activeVisitSiteId != null) {
+                QuickRegisterSheet(
+                    tagId = quickRegisterTagId,
+                    siteId = activeVisitSiteId!!,
+                    isManual = quickRegisterIsManual,
+                    viewModel = viewModel,
+                    onRegister = { tid, assetType, name, location, siteId ->
+                        viewModel.registerFieldAnalystAsset(tid, assetType, name, location, siteId)
+                        showQuickRegister = false
+                        viewModel.showFieldAnalystDashboard()
+                    },
+                    onDismiss = { showQuickRegister = false }
+                )
+            }
+        }
+
+        is EmberViewModel.ScanState.FieldAnalystDashboard -> {
+            val orgId = organisation?.id
+            val sitesFlow = if (orgId != null) viewModel.getSitesForOrg() else null
+            val sites by (sitesFlow?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList<ca.taplog.app.data.Site>()) })
+            val activeSite = sites.find { it.id == activeVisitSiteId }
+
+            FieldAnalystDashboardScreen(
+                activeVisitSite = activeSite,
+                activeVisitAssetCount = fieldAnalystAssetCount,
+                recentSites = sites.take(5),
+                totalAssetsTagged = activeAssets.size,
+                onStartNewVisit = { viewModel.showVisitSetup() },
+                onResumeVisit = { viewModel.showFieldAnalystScanning() },
+                onSiteSelected = { site -> viewModel.startVisit(site) }
+            )
+        }
+
+        is EmberViewModel.ScanState.VisitSetup -> {
+            VisitSetupScreen(
+                onBeginVisit = { name, address, city, postalCode, type, ownerName, ownerPhone, notes ->
+                    viewModel.saveSiteForVisit(
+                        name = name, address = address, city = city,
+                        postalCode = postalCode, buildingType = type,
+                        ownerName = ownerName, ownerPhone = ownerPhone, notes = notes
+                    )
+                },
+                onCancel = { viewModel.showFieldAnalystDashboard() }
+            )
+        }
+
+        is EmberViewModel.ScanState.FieldAnalystScanning -> {
+            val activeSiteId = activeVisitSiteId
+            val assetsThisVisit = if (activeSiteId != null) activeAssets.filter { it.siteId == activeSiteId } else emptyList()
+            var inlineAsset by remember { mutableStateOf<ca.taplog.app.data.Asset?>(null) }
+
+            FieldAnalystScanScreen(
+                siteName = currentSite?.name ?: "",
+                assetCount = fieldAnalystAssetCount,
+                assetsThisVisit = assetsThisVisit,
+                inlineAsset = inlineAsset,
+                onFinishVisit = { viewModel.endVisit() },
+                onAddManually = {
+                    quickRegisterTagId = java.util.UUID.randomUUID().toString()
+                    quickRegisterIsManual = true
+                    showQuickRegister = true
+                },
+                onDismissInlineAsset = { inlineAsset = null }
+            )
+
+            if (showQuickRegister && activeSiteId != null) {
+                QuickRegisterSheet(
+                    tagId = quickRegisterTagId,
+                    siteId = activeSiteId,
+                    isManual = quickRegisterIsManual,
+                    viewModel = viewModel,
+                    onRegister = { tid, assetType, name, location, siteId ->
+                        viewModel.registerFieldAnalystAsset(tid, assetType, name, location, siteId)
+                        showQuickRegister = false
+                    },
+                    onDismiss = { showQuickRegister = false }
+                )
+            }
         }
 
         is EmberViewModel.ScanState.Inspecting -> {
@@ -394,6 +591,36 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                 deficiencies = deficiencies,
                 onResolve = { viewModel.resolveDeficiency(it) },
                 onBack = { viewModel.resetScanState() }
+            )
+        }
+
+        is EmberViewModel.ScanState.Calendar -> {
+            CalendarScreen(
+                calendarEvents = calendarEvents,
+                onAssetSelected = { assetId ->
+                    val asset = activeAssets.find { it.id == assetId }
+                    if (asset != null) viewModel.selectAsset(asset)
+                },
+                onBack = { viewModel.showDashboard() }
+            )
+        }
+
+        is EmberViewModel.ScanState.Tasks -> {
+            TasksScreen(
+                tasks = tasks,
+                onAssetSelected = { assetId ->
+                    val asset = activeAssets.find { it.id == assetId }
+                    if (asset != null) viewModel.selectAsset(asset)
+                },
+                onBack = { viewModel.showDashboard() }
+            )
+        }
+
+        is EmberViewModel.ScanState.Contacts -> {
+            ContactsScreen(
+                contacts = allContacts,
+                onSiteSelected = { siteId -> viewModel.selectSiteById(siteId) },
+                onBack = { viewModel.showDashboard() }
             )
         }
 

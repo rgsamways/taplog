@@ -74,4 +74,11 @@ class Converters {
 
     @TypeConverter
     fun toTapLogVertical(value: String): TapLogVertical = TapLogVertical.valueOf(value)
+
+    // TagEventRole
+    @TypeConverter
+    fun fromTagEventRole(value: TagEventRole): String = value.name
+
+    @TypeConverter
+    fun toTagEventRole(value: String): TagEventRole = TagEventRole.valueOf(value)
 }

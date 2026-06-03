@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,14 +15,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ca.taplog.app.data.OFCAssetType
 import ca.taplog.app.data.OFCCategory
+import kotlinx.coroutines.launch
 
 @Composable
 fun AssetTypePickerDialog(
     onTypeSelected: (OFCAssetType) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    suggestedCode: String? = null
 ) {
-    var selectedCategory by remember { mutableStateOf(OFCCategory.entries.first()) }
+    val initialCategory = remember(suggestedCode) {
+        if (suggestedCode != null) {
+            OFCCategory.entries.find { cat -> cat.types.any { it.code == suggestedCode } }
+                ?: OFCCategory.entries.first()
+        } else OFCCategory.entries.first()
+    }
+    var selectedCategory by remember { mutableStateOf(initialCategory) }
     var searchQuery by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     val displayedTypes = remember(searchQuery, selectedCategory) {
         if (searchQuery.isBlank()) {
@@ -100,7 +111,14 @@ fun AssetTypePickerDialog(
                 }
 
                 // ── Asset type list ────────────────────────────────────────
+                LaunchedEffect(suggestedCode, displayedTypes) {
+                    if (suggestedCode != null) {
+                        val idx = displayedTypes.indexOfFirst { it.code == suggestedCode }
+                        if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+                    }
+                }
                 LazyColumn(
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -109,6 +127,7 @@ fun AssetTypePickerDialog(
                     items(displayedTypes) { assetType ->
                         AssetTypeRow(
                             assetType = assetType,
+                            isSuggested = assetType.code == suggestedCode,
                             onClick = { onTypeSelected(assetType) }
                         )
                     }
@@ -124,9 +143,11 @@ fun AssetTypePickerDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AssetTypeRow(
     assetType: OFCAssetType,
+    isSuggested: Boolean = false,
     onClick: () -> Unit
 ) {
     Row(
@@ -141,11 +162,22 @@ private fun AssetTypeRow(
         verticalAlignment = Alignment.Top
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = assetType.label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = assetType.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                if (isSuggested) {
+                    SuggestionChip(
+                        onClick = {},
+                        label = { Text("AI suggested", style = MaterialTheme.typography.labelSmall) },
+                        colors = SuggestionChipDefaults.suggestionChipColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                }
+            }
             Text(
                 text = assetType.description,
                 style = MaterialTheme.typography.bodySmall,

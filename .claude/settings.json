@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git stash list*)",
+      "Bash(./gradlew*)",
+      "Bash(gradlew*)",
+      "Bash(adb devices*)",
+      "Bash(adb shell*)",
+      "Bash(adb logcat*)",
+      "Bash(adb install*)",
+      "Bash(python*)",
+      "Bash(uvicorn*)",
+      "Bash(ls*)",
+      "Bash(dir*)",
+      "Bash(cat*)",
+      "Bash(type*)",
+      "Bash(find*)",
+      "Bash(grep*)",
+      "Bash(Get-Content*)",
+      "Bash(Get-ChildItem*)"
+    ]
+  }
+}

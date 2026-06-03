@@ -15,6 +15,14 @@ enum class ScanEventType { BROWSE, INSPECTION }
 
 enum class TapLogVertical { EMBER, ANCHOR, HATCH, NEWEL, MAST, CRANE, SEAM, SPAN }
 
+enum class UserRole {
+    INSPECTOR, FIELD_ANALYST, OWNER_COMMERCIAL, OWNER_RESIDENTIAL, TENANT, CARETAKER, SUPERVISOR
+}
+
+enum class TagEventRole {
+    OWNER, FIELD_ANALYST, INSPECTOR, CARETAKER, TENANT
+}
+
 // --- Organisation ---
 
 @Entity(tableName = "organisations")
@@ -60,6 +68,8 @@ data class Site(
     val notes: String? = null,
     val isActive: Boolean = true,
     val isSynced: Boolean = false,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -88,6 +98,8 @@ data class Asset(
     val isActive: Boolean = true,
     val isSynced: Boolean = false,
     val vertical: TapLogVertical = TapLogVertical.EMBER,
+    val registeredByRole: TagEventRole = TagEventRole.OWNER,
+    val registeredByUserId: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -183,6 +195,10 @@ data class TagEvent(
     val retiredAt: Long? = null,
     val retiredReason: RetireReason? = null,
     val retiredByInspectorId: String? = null,
+    val registeredByRole: TagEventRole = TagEventRole.OWNER,
+    val registeredByUserId: String? = null,
+    val registeredByName: String? = null,
+    val registeredByCertNumber: String? = null,
     val isSynced: Boolean = false
 )
 

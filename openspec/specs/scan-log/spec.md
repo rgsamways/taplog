@@ -1,19 +1,23 @@
 # Scan Log Spec
 
 ### Requirement: ScanEvent recorded on every NFC tap
-The system SHALL insert a `ScanEvent` record into the local Room database every time an NFC tag is read, regardless of whether the inspector proceeds to submit an inspection. After Module 28, the `inspectorId` field SHALL be populated from `InspectorPreferences.inspectorId` (set from JWT) for all new ScanEvent records.
+The system SHALL insert a `ScanEvent` record into the local Room database every time an NFC tag is read, regardless of whether the user proceeds to submit an inspection or register an asset. The `inspectorId` field SHALL be populated from `InspectorPreferences.inspectorId` for all new records.
 
-#### Scenario: NFC tap opens asset detail (BROWSE)
-- **WHEN** the inspector taps an NFC tag and the asset is found in the local database
-- **THEN** a `ScanEvent` with `eventType = BROWSE`, the tag ID, `inspectorName` (from JWT claims), `inspectorId` (from DataStore), and current timestamp is inserted into the `scan_events` table before the `AssetDetailScreen` is shown
+#### Scenario: NFC tap opens asset detail — BROWSE (Inspector)
+- **WHEN** an Inspector taps an NFC tag and the asset is found in Room
+- **THEN** a `ScanEvent` with `eventType = BROWSE`, the tag ID, `inspectorName`, `inspectorId`, and current timestamp is inserted before `AssetDetailScreen` is shown
 
-#### Scenario: Inspector submits inspection (INSPECTION)
-- **WHEN** the inspector completes and submits an inspection form
-- **THEN** a second `ScanEvent` with `eventType = INSPECTION`, the tag ID, `inspectorId` (from DataStore), and `inspectorName` (from JWT) is inserted at submission time
+#### Scenario: Inspector submits inspection — INSPECTION
+- **WHEN** an Inspector completes and submits an inspection form
+- **THEN** a second `ScanEvent` with `eventType = INSPECTION`, the tag ID, `inspectorId`, and `inspectorName` is inserted at submission time
 
-#### Scenario: NFC tap on unknown tag
-- **WHEN** the inspector taps an NFC tag that does not match any asset in the local database
-- **THEN** no `ScanEvent` is inserted (the asset is unknown; there is nothing to log against)
+#### Scenario: NFC tap on unknown tag — routes to UnregisteredTagScreen
+- **WHEN** any user taps an NFC tag that does not match any asset in Room
+- **THEN** no `ScanEvent` is inserted (no asset to log against) and the app navigates to `UnregisteredTagScreen` with the scanned tag ID
+
+#### Scenario: Field Analyst taps registered tag in scan loop
+- **WHEN** a Field Analyst taps a registered tag in `FieldAnalystScanScreen`
+- **THEN** a `ScanEvent` with `eventType = BROWSE` is inserted and an inline asset card is shown (no full-screen navigation)
 
 ### Requirement: ScanEvent is insert-only
 The system SHALL provide no mechanism to update or delete a `ScanEvent` record. The `ScanEventDao` SHALL expose only `insert` and query methods.

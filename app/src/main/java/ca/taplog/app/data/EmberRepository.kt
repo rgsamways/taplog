@@ -62,6 +62,9 @@ class EmberRepository(
     suspend fun getAssetByTagId(tagId: String): Asset? =
         assetDao.getByTagId(tagId)
 
+    fun getAssetsWithDueDates(): Flow<List<AssetWithSite>> =
+        assetDao.getAssetsWithDueDates()
+
     fun getAllAssets(): Flow<List<Asset>> =
         assetDao.getAll()
 
@@ -84,6 +87,9 @@ class EmberRepository(
 
     fun getInspectionsForAsset(assetId: String): Flow<List<Inspection>> =
         inspectionDao.getByAsset(assetId)
+
+    fun getAllInspections(): Flow<List<Inspection>> =
+        inspectionDao.getAll()
 
     suspend fun getUnsyncedInspections(): List<Inspection> =
         inspectionDao.getUnsynced()
@@ -132,6 +138,9 @@ class EmberRepository(
 
     fun getTagEventsForAsset(assetId: String): Flow<List<TagEvent>> =
         tagEventDao.getByAsset(assetId)
+
+    suspend fun getFirstTagEventForAsset(assetId: String): TagEvent? =
+        tagEventDao.getFirstForAsset(assetId)
 
     suspend fun getUnsyncedTagEvents(): List<TagEvent> =
         tagEventDao.getUnsynced()

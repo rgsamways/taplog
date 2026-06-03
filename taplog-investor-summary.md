@@ -1,5 +1,5 @@
 # TapLog — Investor Summary
-> Last updated: 2026-05-31
+> Last updated: 2026-06-01
 
 ---
 
@@ -67,9 +67,9 @@ TapLog is not one product. It is a platform with vertical-specific modules, each
 
 | Vertical | Domain | Status |
 |---|---|---|
-| **Ember** | Fire safety inspection | 🔨 Active build — full hierarchy working on device |
-| **Anchor** | Fall protection | Specced, next after Ember |
-| **Hatch** | Confined space | Specced, tier 1 underserved |
+| **Ember** | Fire safety inspection | ✅ Complete — vertical engine, site map, geocoding, full brand |
+| **Anchor** | Fall protection | Module 37 — backend config only |
+| **Hatch** | Confined space | Module 38 — EntryEventScreen + config |
 | Mast | Scaffolding / telecom towers | Tier 2 |
 | Crane | Crane and hoist | Tier 2 |
 | Seam | Welding / pressure vessels | Tier 2 |
@@ -77,6 +77,24 @@ TapLog is not one product. It is a platform with vertical-specific modules, each
 | Span | Bridges / infrastructure | Tier 3 |
 
 Each vertical shares the same core engine (NFC scanning, offline sync, deficiency tracking, reporting) and adds trade-specific asset types, inspection codes, and regulatory frameworks. The platform moat: every vertical built makes the next one cheaper and faster to ship.
+
+---
+
+## Vertical Bundles — Industry Fluency at the Point of Sale
+
+Above the vertical layer sits a bundle layer: named, branded collections of verticals targeted at a specific industry. Bundles are presented first during org onboarding. Individual vertical selection is available as "custom."
+
+**The principle:** Buyers don't buy components — they buy recognition. A product that reflects a buyer's industry back at them closes faster than one that requires them to assemble the right combination themselves.
+
+**First bundle: TapLog Adit (mining)**
+
+Underground mining operations require fire suppression (Ember), fall protection (Anchor), and confined space entry management (Hatch) as a baseline life safety cluster. TapLog Adit packages all three under a name the industry recognizes — an adit is a horizontal mine entry tunnel. The latent metaphor: an adit is how you get into the mine; TapLog Adit is how you get into compliance.
+
+| Bundle | Industry | Verticals | Target venue |
+|---|---|---|---|
+| **TapLog Adit** | Mining / Underground | Ember, Anchor, Hatch | PDAC 2027 |
+
+Additional bundles will follow the same pattern as new verticals are built — each targeting an industry with its own regulatory cluster, vocabulary, and buyer profile.
 
 ---
 
@@ -94,7 +112,7 @@ Fire safety is the strongest beachhead:
 
 **Target customer:** Multi-inspector fire safety company (3–15 inspectors, territorial coverage). The company owner is the buyer; the field inspector is the champion. This is a B2B sale to a trade business, not a consumer app.
 
-**Sequence after Ember:** Anchor → Hatch — the "life safety cluster." These three verticals together address the highest-urgency, most underserved segment of the market.
+**Sequence after Ember:** Anchor → Hatch — the "life safety cluster." These three verticals together address the highest-urgency, most underserved segment of the market — and form the foundation of TapLog Adit.
 
 **Life safety cluster — full comparison:**
 
@@ -224,6 +242,7 @@ This creates a recurring hardware + service revenue stream alongside the softwar
 - **Sync:** WorkManager background worker (verified end-to-end)
 - **Backend:** FastAPI + MongoDB (live — https://web-production-a9fb1.up.railway.app)
 - **NFC:** Native Android NFC foreground dispatch — no third-party dependency
+- **Maps:** Mapbox SDK v11.12.0 — site map view, geocoding, dark map style
 - **Identity:** Authenticated inspector accounts with device registration (Module 28)
 - **Email:** Resend (transactional — verification codes)
 - **Infrastructure:** Railway (auto-deploy), MongoDB Atlas (M0 free tier)
@@ -235,12 +254,17 @@ This creates a recurring hardware + service revenue stream alongside the softwar
 - **Ember v1 loop verified end-to-end on physical device** (Pixel 10 Pro XL, API 36):
   Register → email verification → org setup → site creation → NFC scan → asset registration → inspection → PDF report → share sheet
 - Full Organisation → Site → Asset → Inspection hierarchy working on device
+- **Brand-native app experience:** full TapLog palette (navy/teal) applied across Material3 light and dark themes; custom Canvas-drawn splash screen icon with animated entrance; no default Material theme colours anywhere in the app
+- **Site map view:** inspectors toggle between list and map view on the site dashboard; sites geocoded at save time using Mapbox Geocoding API (country=CA); map renders labelled pins on a dark Mapbox canvas matching the TapLog brand; tapping a pin navigates to the site detail screen; sites without coords shown in list view only with unmapped count displayed
+- **Vertical config backend live:** Ember VerticalConfig seeded to MongoDB `verticals` collection; `GET /api/v1/verticals` endpoint deployed and returning configs at startup; app fetches from backend with Room cache and static Kotlin fallback chain
 - **Tamper-evident scan log** — every NFC tap logged as a `ScanEvent` (insert-only, synced), independent of whether inspection is submitted
 - **Tag lifecycle** — `TagEvent` records every tag attachment and retirement. Tag replacement workflow on AssetDetailScreen. History survives tag replacement.
 - **Pre-inspection checklists** — 35 OFC asset types, each with 5–7 CAN/ULC-S536:19-aligned inspection steps, displayed before the form, fully offline
 - **Authenticated inspector identity** — registration, email verification (6-digit code), device registration with new-device email challenge, JWT on every request. Knowing a cert number is not enough to fake a record.
 - **PDF inspection reports** — one PDF per inspection, generated on-device in under 1 second, shared via Android share sheet (email, WhatsApp, Drive). Includes full org/site/asset/inspector/deficiency record.
 - **Photo capture for deficiencies** — inspector photographs the deficiency at time of recording. Thumbnail shown inline in inspection form and open deficiencies list. Photo path persisted in Room and sync record.
+- **Vertical engine** — TapLog is now a vertical factory: adding a new trade vertical requires a MongoDB config document, no Android code changes. Ember runs entirely from a server-delivered VerticalConfig with a static Kotlin fallback for cold starts.
+- **Dashboard intelligence (Module 40 in progress):** calendar view of upcoming inspection due dates, unified task list (overdue assets + open deficiencies), aggregated contacts from site records — all derived from existing Room data, no migrations
 - OFC asset type picker — 6 categories, 35 asset types, full-text search, plain-English descriptions
 - Regulatory inspection intervals enforced automatically per OFC
 - Source-aware back navigation + system back gesture support on all screens
@@ -262,7 +286,7 @@ Bancroft–Peterborough–Belleville corridor. Personal outreach. Ember pilot ac
 OAFC Niagara Falls November. Reference customer from Phase 1. Expand to 20–50 paying inspector seats across Ontario.
 
 **Phase 3 — National (2027)**
-OFC framework applies Canada-wide. Same product, new provinces. NEFEC Huntsville. PDAC if mining vertical launched.
+OFC framework applies Canada-wide. Same product, new provinces. NEFEC Huntsville. PDAC if TapLog Adit (mining bundle) is ready.
 
 ---
 
@@ -276,7 +300,7 @@ The founder has approximately 25 years of software development experience, inclu
 
 - Ontario alone has tens of thousands of licensed fire safety inspectors, home inspectors, and fall protection contractors
 - Every commercial property requires recurring regulated inspections — the demand is legislated, not optional
-- The addressable market expands with every vertical added
+- The addressable market expands with every vertical added; vertical bundles accelerate market entry into new industries by leading with industry-fluent packaging rather than component lists
 - Canadian-first go-to-market, with architecture that scales nationally and internationally
 
 ---
@@ -285,11 +309,12 @@ The founder has approximately 25 years of software development experience, inclu
 
 TapLog is seeking angel investment to accelerate:
 
-1. Completion of Ember v1 — tamper-evident scan log ✅, authenticated identity ✅, PDF reports ✅, photo capture ✅, visual asset ID (Module 31)
+1. Completion of Ember v1 — tamper-evident scan log ✅, authenticated identity ✅, PDF reports ✅, photo capture ✅, site map ✅, visual asset ID (Module 31)
 2. Launch of Anchor and Hatch verticals
 3. Sales and onboarding of first paying Ember customers
 4. Farpost integration (Newel × Farpost address lookup)
 5. Bulk tag provisioning service (v2)
+6. TapLog Adit bundle — mining vertical launch at PDAC 2027
 
 ---
 

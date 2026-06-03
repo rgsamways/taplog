@@ -1,3 +1,6 @@
+# Local machine config — contains API keys, never commit
+local.properties
+
 # Compiled class file
 *.class
 

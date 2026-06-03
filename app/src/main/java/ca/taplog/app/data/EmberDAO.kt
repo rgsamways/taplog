@@ -76,6 +76,15 @@ interface AssetDao {
 
     @Query("UPDATE assets SET lastInspectedAt = :time, nextInspectionDue = :nextDue WHERE id = :id")
     suspend fun updateInspectionDates(id: String, time: Long, nextDue: Long)
+
+    @Query("""
+        SELECT a.*, s.name as siteName
+        FROM assets a
+        INNER JOIN sites s ON a.siteId = s.id
+        WHERE a.isActive = 1 AND a.nextInspectionDue IS NOT NULL
+        ORDER BY a.nextInspectionDue ASC
+    """)
+    fun getAssetsWithDueDates(): Flow<List<AssetWithSite>>
 }
 
 // --- InspectionDao ---
@@ -87,6 +96,9 @@ interface InspectionDao {
 
     @Query("SELECT * FROM inspections WHERE assetId = :assetId ORDER BY inspectedAt DESC")
     fun getByAsset(assetId: String): Flow<List<Inspection>>
+
+    @Query("SELECT * FROM inspections ORDER BY inspectedAt DESC")
+    fun getAll(): Flow<List<Inspection>>
 
     @Query("SELECT * FROM inspections WHERE isSynced = 0")
     suspend fun getUnsynced(): List<Inspection>
@@ -122,12 +134,22 @@ interface TagEventDao {
     @Query("SELECT * FROM tag_events WHERE assetId = :assetId ORDER BY attachedAt DESC")
     fun getByAsset(assetId: String): Flow<List<TagEvent>>
 
+    @Query("SELECT * FROM tag_events WHERE assetId = :assetId ORDER BY attachedAt ASC LIMIT 1")
+    suspend fun getFirstForAsset(assetId: String): TagEvent?
+
     @Query("SELECT * FROM tag_events WHERE isSynced = 0")
     suspend fun getUnsynced(): List<TagEvent>
 
     @Query("UPDATE tag_events SET isSynced = 1 WHERE id = :id")
     suspend fun markSynced(id: String)
 }
+
+// --- AssetWithSite (non-entity JOIN result) ---
+
+data class AssetWithSite(
+    @Embedded val asset: Asset,
+    @ColumnInfo(name = "siteName") val siteName: String
+)
 
 // --- DeficiencyDao ---
 

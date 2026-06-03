@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import ca.taplog.app.data.Site
 import kotlinx.coroutines.flow.Flow
 
+private enum class ViewMode { LIST, MAP }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SiteListScreen(
@@ -24,13 +29,28 @@ fun SiteListScreen(
     deficiencyCount: Int = 0,
     onSiteSelected: (Site) -> Unit,
     onAddSite: () -> Unit,
-    onShowDeficiencies: () -> Unit
+    onShowDeficiencies: () -> Unit,
+    onGeocodeUnresolved: (List<Site>) -> Unit = {},
+    onBack: (() -> Unit)? = null,
+    isEmbedded: Boolean = false
 ) {
     val sites by (sitesFlow ?: return).collectAsState(initial = emptyList())
+    var viewMode by remember { mutableStateOf(ViewMode.LIST) }
+    var geocodeTriggered by remember { mutableStateOf(false) }
+
+    val modifier = if (isEmbedded) Modifier.heightIn(max = 320.dp) else Modifier
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
                 title = {
                     Column {
                         Text(
@@ -49,9 +69,7 @@ fun SiteListScreen(
                     if (deficiencyCount > 0) {
                         IconButton(onClick = onShowDeficiencies) {
                             BadgedBox(
-                                badge = {
-                                    Badge { Text(deficiencyCount.toString()) }
-                                }
+                                badge = { Badge { Text(deficiencyCount.toString()) } }
                             ) {
                                 Icon(
                                     Icons.Default.Warning,
@@ -61,49 +79,85 @@ fun SiteListScreen(
                             }
                         }
                     }
+                    IconButton(onClick = { viewMode = ViewMode.LIST }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ViewList,
+                            contentDescription = "List view",
+                            tint = if (viewMode == ViewMode.LIST)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { viewMode = ViewMode.MAP }) {
+                        Icon(
+                            Icons.Default.Map,
+                            contentDescription = "Map view",
+                            tint = if (viewMode == ViewMode.MAP)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddSite) {
-                Icon(Icons.Default.Add, contentDescription = "Add Site")
+            if (viewMode == ViewMode.LIST && !isEmbedded) {
+                FloatingActionButton(onClick = onAddSite) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Site")
+                }
             }
         }
     ) { padding ->
-        if (sites.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "No sites yet",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Tap + to add your first site",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+        when (viewMode) {
+            ViewMode.MAP -> {
+                // Trigger lazy geocoding once on first map open
+                LaunchedEffect(Unit) {
+                    if (!geocodeTriggered) {
+                        geocodeTriggered = true
+                        onGeocodeUnresolved(sites)
+                    }
+                }
+                Box(modifier = Modifier.padding(padding)) {
+                    SiteMapView(sites = sites, onSiteSelected = onSiteSelected)
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(sites, key = { it.id }) { site ->
-                    SiteCard(
-                        site = site,
-                        onClick = { onSiteSelected(site) }
-                    )
+
+            ViewMode.LIST -> {
+                if (sites.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "No sites yet",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tap + to add your first site",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(sites, key = { it.id }) { site ->
+                            SiteCard(site = site, onClick = { onSiteSelected(site) })
+                        }
+                    }
                 }
             }
         }
@@ -111,10 +165,7 @@ fun SiteListScreen(
 }
 
 @Composable
-fun SiteCard(
-    site: Site,
-    onClick: () -> Unit
-) {
+fun SiteCard(site: Site, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()

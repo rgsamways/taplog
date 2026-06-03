@@ -30,6 +30,10 @@ android {
 
         buildConfigField("String", "API_KEY", "\"${localProperties["API_KEY"]}\"")
         buildConfigField("String", "BASE_URL", "\"${localProperties["BASE_URL"]}\"")
+        buildConfigField("String", "MAPBOX_PUBLIC_TOKEN", "\"${localProperties["MAPBOX_PUBLIC_TOKEN"] ?: ""}\"")
+        manifestPlaceholders["MAPBOX_PUBLIC_TOKEN"] = localProperties["MAPBOX_PUBLIC_TOKEN"] ?: ""
+        buildConfigField("String", "ANTHROPIC_API_KEY", "\"${localProperties["ANTHROPIC_API_KEY"] ?: ""}\"")
+
     }
 
     buildTypes {
@@ -48,6 +52,12 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 }
 
@@ -89,4 +99,8 @@ dependencies {
 
     // WorkManager (needed for Module 25 — add now)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Mapbox
+    implementation(libs.mapbox.maps)
+    implementation(libs.mapbox.compose)
 }

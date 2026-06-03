@@ -1,6 +1,11 @@
 package ca.taplog.app.ui.ember
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -9,19 +14,25 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import ca.taplog.app.data.OFCAssetType
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AssetRegistrationScreen(
     nfcTagId: String,
     siteName: String = "",
+    viewModel: EmberViewModel? = null,
     onSave: (
         name: String,
         assetTypeCode: String,
@@ -31,6 +42,7 @@ fun AssetRegistrationScreen(
     ) -> Unit,
     onCancel: () -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var selectedOFCType by remember { mutableStateOf<OFCAssetType?>(null) }
     var location by remember { mutableStateOf("") }
@@ -38,15 +50,50 @@ fun AssetRegistrationScreen(
     var showPicker by remember { mutableStateOf(false) }
     var showDateError by remember { mutableStateOf(false) }
 
+    val identificationLoading by (viewModel?.identificationLoading?.collectAsState() ?: remember { mutableStateOf(false) })
+    val suggestedCode by (viewModel?.suggestedAssetCode?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
+
+    // Temp file for AI identification photo
+    val tempPhotoFile = remember { File(context.cacheDir, "ai_identify_${System.currentTimeMillis()}.jpg") }
+    val tempPhotoUri = remember {
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempPhotoFile)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success && tempPhotoFile.exists()) {
+            viewModel?.identifyAsset(tempPhotoFile.absolutePath)
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) cameraLauncher.launch(tempPhotoUri)
+    }
+    fun launchCamera() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            cameraLauncher.launch(tempPhotoUri)
+        } else {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     BackHandler { onCancel() }
+
+    // Open picker when AI suggestion arrives
+    LaunchedEffect(suggestedCode) {
+        if (suggestedCode != null) showPicker = true
+    }
 
     if (showPicker) {
         AssetTypePickerDialog(
             onTypeSelected = { type ->
                 selectedOFCType = type
                 showPicker = false
+                viewModel?.clearSuggestedAssetCode()
             },
-            onDismiss = { showPicker = false }
+            onDismiss = {
+                showPicker = false
+                viewModel?.clearSuggestedAssetCode()
+            },
+            suggestedCode = suggestedCode
         )
     }
 
@@ -104,27 +151,33 @@ fun AssetRegistrationScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // OFC asset type picker
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = selectedOFCType?.label ?: "",
-                    onValueChange = {},
-                    label = { Text("Asset type") },
-                    placeholder = { Text("Select type…") },
-                    trailingIcon = {
-                        Text("▾", style = MaterialTheme.typography.bodyLarge)
-                    },
-                    readOnly = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { showPicker = true }
-                )
+            // OFC asset type picker + camera button
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(modifier = Modifier.weight(1f)) {
+                    OutlinedTextField(
+                        value = if (identificationLoading) "Identifying…" else (selectedOFCType?.label ?: ""),
+                        onValueChange = {},
+                        label = { Text("Asset type") },
+                        placeholder = { Text("Select type…") },
+                        trailingIcon = { Text("▾", style = MaterialTheme.typography.bodyLarge) },
+                        readOnly = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (!identificationLoading) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { showPicker = true }
+                        )
+                    }
+                }
+                if (identificationLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                } else {
+                    IconButton(onClick = { launchCamera() }) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Identify with camera", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
             }
 
             selectedOFCType?.let { type ->

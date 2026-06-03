@@ -20,6 +20,8 @@ import ca.taplog.app.data.OFCCategory
 import ca.taplog.app.data.RetireReason
 import ca.taplog.app.data.ScanEvent
 import ca.taplog.app.data.ScanEventType
+import ca.taplog.app.data.TagEvent
+import ca.taplog.app.data.TagEventRole
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -29,6 +31,7 @@ fun AssetDetailScreen(
     asset: Asset,
     inspections: List<Inspection>,
     scanEvents: List<ScanEvent> = emptyList(),
+    birthingTagEvent: TagEvent? = null,
     siteName: String = "",
     source: AssetDetailSource = AssetDetailSource.FROM_SCAN,
     onStartInspection: () -> Unit,
@@ -114,6 +117,35 @@ fun AssetDetailScreen(
                             } ?: "Not scheduled"
                         )
                         AssetDetailRow("Tag ID", asset.nfcTagId)
+                    }
+                }
+            }
+
+            // Birthing event provenance card
+            if (birthingTagEvent != null) {
+                item {
+                    val roleLabel = when (birthingTagEvent.registeredByRole) {
+                        TagEventRole.FIELD_ANALYST -> "Field Analyst"
+                        TagEventRole.INSPECTOR -> "Inspector"
+                        TagEventRole.TENANT -> "Tenant"
+                        TagEventRole.CARETAKER -> "Caretaker"
+                        TagEventRole.OWNER -> "Owner"
+                    }
+                    val byName = birthingTagEvent.registeredByName ?: "owner"
+                    val onDate = dateFormat.format(Date(birthingTagEvent.attachedAt))
+                    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "Registered by $byName as $roleLabel",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                onDate,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
