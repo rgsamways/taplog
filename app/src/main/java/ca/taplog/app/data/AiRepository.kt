@@ -22,6 +22,11 @@ data class AssetIdentificationResult(
     val reasoning: String
 )
 
+data class ChatMessage(
+    val role: String,   // "user" or "assistant"
+    val content: String
+)
+
 class AiRepository {
 
     private val client = OkHttpClient.Builder()
@@ -143,7 +148,6 @@ If you cannot identify the asset with at least MEDIUM confidence, set code to nu
         return try {
             val root = JSONObject(body)
             val text = root.getJSONArray("content").getJSONObject(0).getString("text")
-            // Strip markdown code fences if present
             val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             val result = JSONObject(clean)
             AssetIdentificationResult(
@@ -151,6 +155,44 @@ If you cannot identify the asset with at least MEDIUM confidence, set code to nu
                 confidence = result.optString("confidence", "LOW"),
                 reasoning = result.optString("reasoning", "")
             )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun chat(
+        systemPrompt: String,
+        conversationHistory: List<ChatMessage>,
+        userMessage: String
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val messages = JSONArray()
+            (conversationHistory + ChatMessage("user", userMessage)).forEach { msg ->
+                messages.put(JSONObject().apply {
+                    put("role", msg.role)
+                    put("content", msg.content)
+                })
+            }
+
+            val requestBody = JSONObject().apply {
+                put("model", "claude-sonnet-4-6")
+                put("max_tokens", 400)
+                put("system", systemPrompt)
+                put("messages", messages)
+            }.toString()
+
+            val request = Request.Builder()
+                .url("https://api.anthropic.com/v1/messages")
+                .addHeader("x-api-key", BuildConfig.ANTHROPIC_API_KEY)
+                .addHeader("anthropic-version", "2023-06-01")
+                .addHeader("content-type", "application/json")
+                .post(requestBody.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext null
+            val body = response.body?.string() ?: return@withContext null
+            JSONObject(body).getJSONArray("content").getJSONObject(0).getString("text")
         } catch (_: Exception) {
             null
         }

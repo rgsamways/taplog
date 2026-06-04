@@ -573,14 +573,24 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                     onBack = { viewModel.selectAsset(state.asset) }
                 )
             } else {
+                val copilotMessages by viewModel.copilotMessages.collectAsState()
+                val copilotLoading by viewModel.copilotLoading.collectAsState()
                 InspectionFormScreen(
                     asset = state.asset,
                     siteName = currentSite?.name ?: "",
                     inspectorClaims = inspectorClaims,
+                    copilotMessages = copilotMessages,
+                    copilotLoading = copilotLoading,
+                    onCopilotSend = { msg, vc, at -> viewModel.sendCopilotMessage(msg, vc, at) },
+                    onCopilotClear = { viewModel.clearCopilot() },
                     onSubmit = { result, notes, defs ->
                         viewModel.saveInspection(state.asset, result, notes, null, null, defs)
+                        viewModel.clearCopilot()
                     },
-                    onCancel = { viewModel.selectAsset(state.asset) }
+                    onCancel = {
+                        viewModel.clearCopilot()
+                        viewModel.selectAsset(state.asset)
+                    }
                 )
             }
         }

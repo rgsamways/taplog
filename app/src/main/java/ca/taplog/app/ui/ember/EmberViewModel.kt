@@ -19,6 +19,7 @@ import ca.taplog.app.data.ScanEvent
 import ca.taplog.app.data.ScanEventType
 import ca.taplog.app.data.Site
 import ca.taplog.app.data.AiRepository
+import ca.taplog.app.data.ChatMessage
 import ca.taplog.app.data.ServiceRequest
 import ca.taplog.app.data.ServiceRequestStatus
 import ca.taplog.app.data.TagEvent
@@ -859,6 +860,71 @@ class EmberViewModel(
 
     fun clearSuggestedAssetCode() {
         _suggestedAssetCode.value = null
+    }
+
+    // --- AI co-pilot ---
+
+    private val _copilotMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val copilotMessages: StateFlow<List<ChatMessage>> = _copilotMessages.asStateFlow()
+
+    private val _copilotLoading = MutableStateFlow(false)
+    val copilotLoading: StateFlow<Boolean> = _copilotLoading.asStateFlow()
+
+    fun sendCopilotMessage(
+        userMessage: String,
+        vertical: ca.taplog.app.data.VerticalConfig,
+        assetType: ca.taplog.app.data.VerticalAssetType
+    ) {
+        val ai = aiRepository ?: return
+        _copilotMessages.value = _copilotMessages.value + ChatMessage("user", userMessage)
+        _copilotLoading.value = true
+        viewModelScope.launch {
+            val systemPrompt = buildCopilotPrompt(vertical, assetType)
+            val history = _copilotMessages.value.dropLast(1) // exclude the message just added
+            val response = ai.chat(systemPrompt, history, userMessage)
+            _copilotMessages.value = _copilotMessages.value + ChatMessage(
+                "assistant",
+                response ?: "Couldn't reach the assistant — check your connection"
+            )
+            _copilotLoading.value = false
+        }
+    }
+
+    fun clearCopilot() {
+        _copilotMessages.value = emptyList()
+        _copilotLoading.value = false
+    }
+
+    private fun buildCopilotPrompt(
+        vertical: ca.taplog.app.data.VerticalConfig,
+        assetType: ca.taplog.app.data.VerticalAssetType
+    ): String {
+        val checklist = assetType.checklistItems.joinToString("\n") { "- $it" }
+        val results = vertical.formProfile.resultOptions.joinToString("\n") { "- ${it.label}: ${it.action.name}" }
+        return """
+You are a field inspection assistant for ${vertical.displayName} inspectors using TapLog.
+
+Regulatory framework: ${vertical.regulatoryFramework}
+
+The inspector is currently inspecting:
+Asset type: ${assetType.label}
+Description: ${assetType.description}
+
+Pre-inspection checklist for this asset type:
+$checklist
+
+Result options for this vertical:
+$results
+
+Your role:
+- Answer questions about what to look for during inspection of this specific asset type
+- Clarify what constitutes a pass vs. a fail vs. requires-attention finding
+- Explain regulatory requirements in plain language
+- Help the inspector understand unfamiliar deficiency types
+- Be concise — inspectors are in the field, not at a desk
+
+Do not tell the inspector what result to record — that is always their professional judgment.
+        """.trimIndent()
     }
 
     // --- Tag replacement ---

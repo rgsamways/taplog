@@ -44,6 +44,10 @@ fun InspectionFormScreen(
     asset: Asset,
     siteName: String = "",
     inspectorClaims: InspectorClaims?,
+    copilotMessages: List<ca.taplog.app.data.ChatMessage> = emptyList(),
+    copilotLoading: Boolean = false,
+    onCopilotSend: (String, ca.taplog.app.data.VerticalConfig, ca.taplog.app.data.VerticalAssetType) -> Unit = { _, _, _ -> },
+    onCopilotClear: () -> Unit = {},
     onSubmit: (
         result: InspectionResult,
         notes: String?,
@@ -55,6 +59,22 @@ fun InspectionFormScreen(
 
     val config = remember(asset.vertical) { VerticalRegistry.get(asset.vertical) }
     val formProfile = config.formProfile
+    val assetTypeForCopilot = remember(asset.assetType) {
+        config.assetTypeRegistry.find { it.code == asset.assetType }
+    }
+    var showCopilot by remember { mutableStateOf(false) }
+
+    if (showCopilot && assetTypeForCopilot != null) {
+        CopilotBottomSheet(
+            messages = copilotMessages,
+            isLoading = copilotLoading,
+            vertical = config,
+            assetType = assetTypeForCopilot,
+            onSend = { msg -> onCopilotSend(msg, config, assetTypeForCopilot) },
+            onClear = onCopilotClear,
+            onDismiss = { showCopilot = false }
+        )
+    }
 
     var selectedOption by remember { mutableStateOf<ca.taplog.app.data.ResultOption?>(null) }
     val fieldValues = remember { mutableStateMapOf<String, String>() }
@@ -73,6 +93,22 @@ fun InspectionFormScreen(
     }
 
     Scaffold(
+        floatingActionButton = {
+            if (assetTypeForCopilot != null) {
+                FloatingActionButton(
+                    onClick = { showCopilot = true },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        "?",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        },
         topBar = {
             TopAppBar(
                 title = {
