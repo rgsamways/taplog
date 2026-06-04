@@ -23,6 +23,39 @@ enum class TagEventRole {
     OWNER, FIELD_ANALYST, INSPECTOR, CARETAKER, TENANT
 }
 
+enum class ServiceRequestStatus {
+    SENT, ACKNOWLEDGED, SCHEDULED, COMPLETED, NO_RESPONSE
+}
+
+// --- ServiceRequest ---
+
+@Entity(
+    tableName = "service_requests",
+    foreignKeys = [ForeignKey(
+        entity = Asset::class,
+        parentColumns = ["id"],
+        childColumns = ["assetId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("assetId")]
+)
+data class ServiceRequest(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val assetId: String,
+    val siteId: String,
+    val requestedById: String,
+    val requestedByRole: UserRole,
+    val contractorName: String? = null,
+    val contractorPhone: String? = null,
+    val contractorEmail: String? = null,
+    val notes: String? = null,
+    val status: ServiceRequestStatus = ServiceRequestStatus.SENT,
+    val sentAtMs: Long = System.currentTimeMillis(),
+    val respondedAtMs: Long? = null,
+    val resolvedAtMs: Long? = null,
+    val isSynced: Boolean = false
+)
+
 // --- Organisation ---
 
 @Entity(tableName = "organisations")

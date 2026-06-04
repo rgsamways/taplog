@@ -20,6 +20,8 @@ import ca.taplog.app.data.OFCCategory
 import ca.taplog.app.data.RetireReason
 import ca.taplog.app.data.ScanEvent
 import ca.taplog.app.data.ScanEventType
+import ca.taplog.app.data.ServiceRequest
+import ca.taplog.app.data.ServiceRequestStatus
 import ca.taplog.app.data.TagEvent
 import ca.taplog.app.data.TagEventRole
 import java.text.SimpleDateFormat
@@ -32,11 +34,14 @@ fun AssetDetailScreen(
     inspections: List<Inspection>,
     scanEvents: List<ScanEvent> = emptyList(),
     birthingTagEvent: TagEvent? = null,
+    serviceRequests: List<ServiceRequest> = emptyList(),
     siteName: String = "",
     source: AssetDetailSource = AssetDetailSource.FROM_SCAN,
     onStartInspection: () -> Unit,
     onStartReplacement: (RetireReason) -> Unit = {},
     onShareReport: (Inspection) -> Unit = {},
+    onRequestInspection: () -> Unit = {},
+    onViewServiceRequestTrail: () -> Unit = {},
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
@@ -146,6 +151,57 @@ fun AssetDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                }
+            }
+
+            // Service request summary
+            if (serviceRequests.isNotEmpty()) {
+                item {
+                    val mostRecent = serviceRequests.first()
+                    val statusLabel = when (mostRecent.status) {
+                        ServiceRequestStatus.SENT -> "Pending"
+                        ServiceRequestStatus.ACKNOWLEDGED -> "Acknowledged"
+                        ServiceRequestStatus.SCHEDULED -> "Scheduled"
+                        ServiceRequestStatus.COMPLETED -> "Completed"
+                        ServiceRequestStatus.NO_RESPONSE -> "No response"
+                    }
+                    val isNoResponse = mostRecent.status == ServiceRequestStatus.NO_RESPONSE
+                    OutlinedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.outlinedCardColors(
+                            containerColor = if (isNoResponse) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                            else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "${serviceRequests.size} service request${if (serviceRequests.size > 1) "s" else ""} · $statusLabel",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = if (isNoResponse) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            TextButton(onClick = onViewServiceRequestTrail) { Text("View all") }
+                        }
+                    }
+                }
+            }
+
+            // Request Inspection button (overdue assets only)
+            val isOverdue = (asset.nextInspectionDue ?: Long.MAX_VALUE) < System.currentTimeMillis()
+            if (isOverdue) {
+                item {
+                    OutlinedButton(
+                        onClick = onRequestInspection,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Request Inspection", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }

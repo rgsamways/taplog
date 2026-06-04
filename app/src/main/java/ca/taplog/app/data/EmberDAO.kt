@@ -180,3 +180,20 @@ interface DeficiencyDao {
     @Query("SELECT * FROM deficiencies WHERE inspectionId = :inspectionId ORDER BY severity DESC")
     suspend fun getByInspection(inspectionId: String): List<Deficiency>
 }
+
+// --- ServiceRequestDao ---
+
+@Dao
+interface ServiceRequestDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(request: ServiceRequest)
+
+    @Query("SELECT * FROM service_requests WHERE assetId = :assetId ORDER BY sentAtMs DESC")
+    fun getByAsset(assetId: String): Flow<List<ServiceRequest>>
+
+    @Query("SELECT * FROM service_requests WHERE status = 'SENT' AND sentAtMs < :cutoffMs")
+    suspend fun getExpiredSent(cutoffMs: Long): List<ServiceRequest>
+
+    @Query("UPDATE service_requests SET status = 'NO_RESPONSE' WHERE id IN (:ids)")
+    suspend fun updateStatusToNoResponse(ids: List<String>)
+}

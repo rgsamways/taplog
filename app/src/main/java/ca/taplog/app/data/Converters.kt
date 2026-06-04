@@ -81,4 +81,11 @@ class Converters {
 
     @TypeConverter
     fun toTagEventRole(value: String): TagEventRole = TagEventRole.valueOf(value)
+
+    // ServiceRequestStatus
+    @TypeConverter
+    fun fromServiceRequestStatus(value: ServiceRequestStatus): String = value.name
+
+    @TypeConverter
+    fun toServiceRequestStatus(value: String): ServiceRequestStatus = ServiceRequestStatus.valueOf(value)
 }

@@ -44,6 +44,7 @@ class TapLogApplication : Application() {
 
         scheduleSyncIfNeeded(this)
         initVerticalRegistry()
+        appScope.launch { repository.markExpiredRequestsNoResponse() }
     }
 
     private fun initVerticalRegistry() {
@@ -113,7 +114,8 @@ class TapLogApplication : Application() {
             inspectionDao = database.inspectionDao(),
             deficiencyDao = database.deficiencyDao(),
             scanEventDao = database.scanEventDao(),
-            tagEventDao = database.tagEventDao()
+            tagEventDao = database.tagEventDao(),
+            serviceRequestDao = database.serviceRequestDao()
         )
     }
 

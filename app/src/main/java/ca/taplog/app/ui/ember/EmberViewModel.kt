@@ -19,6 +19,8 @@ import ca.taplog.app.data.ScanEvent
 import ca.taplog.app.data.ScanEventType
 import ca.taplog.app.data.Site
 import ca.taplog.app.data.AiRepository
+import ca.taplog.app.data.ServiceRequest
+import ca.taplog.app.data.ServiceRequestStatus
 import ca.taplog.app.data.TagEvent
 import ca.taplog.app.data.TagEventRole
 import ca.taplog.app.data.TapLogVertical
@@ -75,6 +77,9 @@ class EmberViewModel(
         object VisitSetup : ScanState()
         object FieldAnalystScanning : ScanState()
         data class UnregisteredTag(val tagId: String) : ScanState()
+        // Service request states
+        data class ServiceRequestForm(val asset: Asset) : ScanState()
+        data class ServiceRequestTrail(val asset: Asset) : ScanState()
     }
 
     // --- Dashboard data classes ---
@@ -758,6 +763,67 @@ class EmberViewModel(
         viewModelScope.launch {
             _birthingTagEvent.value = repository.getFirstTagEventForAsset(assetId)
         }
+    }
+
+    // --- Service requests ---
+
+    private val _serviceRequestsForCurrentAsset = MutableStateFlow<List<ServiceRequest>>(emptyList())
+    val serviceRequestsForCurrentAsset: StateFlow<List<ServiceRequest>> = _serviceRequestsForCurrentAsset.asStateFlow()
+
+    fun loadServiceRequestsForAsset(assetId: String) {
+        viewModelScope.launch {
+            repository.getServiceRequestsForAsset(assetId).collect { requests ->
+                _serviceRequestsForCurrentAsset.value = requests
+            }
+        }
+    }
+
+    fun sendServiceRequest(
+        asset: Asset,
+        contractorName: String?,
+        contractorPhone: String?,
+        contractorEmail: String?,
+        notes: String?
+    ) {
+        viewModelScope.launch {
+            val inspectorId = inspectorPreferences.inspectorId.first() ?: "local"
+            val role = inspectorPreferences.userRole.first()
+            repository.insertServiceRequest(
+                ServiceRequest(
+                    assetId = asset.id,
+                    siteId = asset.siteId,
+                    requestedById = inspectorId,
+                    requestedByRole = role,
+                    contractorName = contractorName?.takeIf { it.isNotBlank() },
+                    contractorPhone = contractorPhone?.takeIf { it.isNotBlank() },
+                    contractorEmail = contractorEmail?.takeIf { it.isNotBlank() },
+                    notes = notes?.takeIf { it.isNotBlank() },
+                    sentAtMs = System.currentTimeMillis()
+                )
+            )
+            _scanState.value = ScanState.AssetFound(asset)
+        }
+    }
+
+    fun showAssetNotFound() {
+        _scanState.value = ScanState.AssetNotFound
+    }
+
+    fun startManualAssetRegistration() {
+        _lastScannedTagId.value = java.util.UUID.randomUUID().toString()
+        _scanState.value = ScanState.AssetNotFound
+    }
+
+    fun showServiceRequestForm(asset: Asset) {
+        _scanState.value = ScanState.ServiceRequestForm(asset)
+    }
+
+    fun showServiceRequestTrail(asset: Asset) {
+        _scanState.value = ScanState.ServiceRequestTrail(asset)
+    }
+
+    fun markExpiredServiceRequestsNoResponse() {
+        viewModelScope.launch { repository.markExpiredRequestsNoResponse() }
     }
 
     // --- AI asset identification ---

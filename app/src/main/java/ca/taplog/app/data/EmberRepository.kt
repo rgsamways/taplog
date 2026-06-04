@@ -11,7 +11,8 @@ class EmberRepository(
     private val inspectionDao: InspectionDao,
     private val deficiencyDao: DeficiencyDao,
     private val scanEventDao: ScanEventDao,
-    private val tagEventDao: TagEventDao
+    private val tagEventDao: TagEventDao,
+    private val serviceRequestDao: ServiceRequestDao
 ) {
 
     // --- Organisation ---
@@ -178,6 +179,22 @@ class EmberRepository(
                     attachedAt = System.currentTimeMillis()
                 )
             )
+        }
+    }
+
+    // --- ServiceRequest ---
+
+    suspend fun insertServiceRequest(request: ServiceRequest) =
+        serviceRequestDao.insert(request)
+
+    fun getServiceRequestsForAsset(assetId: String): Flow<List<ServiceRequest>> =
+        serviceRequestDao.getByAsset(assetId)
+
+    suspend fun markExpiredRequestsNoResponse() {
+        val cutoff = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
+        val expired = serviceRequestDao.getExpiredSent(cutoff)
+        if (expired.isNotEmpty()) {
+            serviceRequestDao.updateStatusToNoResponse(expired.map { it.id })
         }
     }
 }

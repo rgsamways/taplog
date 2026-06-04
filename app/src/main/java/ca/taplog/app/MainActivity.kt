@@ -38,6 +38,8 @@ import ca.taplog.app.ui.ember.CalendarScreen
 import ca.taplog.app.ui.ember.ContactsScreen
 import ca.taplog.app.data.UserRole
 import ca.taplog.app.ui.ember.DashboardScreen
+import ca.taplog.app.ui.ember.ServiceRequestScreen
+import ca.taplog.app.ui.ember.ServiceRequestTrailScreen
 import ca.taplog.app.ui.ember.FieldAnalystDashboardScreen
 import ca.taplog.app.ui.ember.FieldAnalystScanScreen
 import ca.taplog.app.ui.ember.QuickRegisterSheet
@@ -280,6 +282,7 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
     val allContacts by viewModel.allContacts.collectAsState()
     val userRole by viewModel.userRole.collectAsState()
     val birthingTagEvent by viewModel.birthingTagEvent.collectAsState()
+    val serviceRequests by viewModel.serviceRequestsForCurrentAsset.collectAsState()
     val activeVisitSiteId by viewModel.activeVisitSiteId.collectAsState()
     val fieldAnalystAssetCount by viewModel.fieldAnalystAssetCount.collectAsState()
 
@@ -353,7 +356,7 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                 site = state.site,
                 assets = siteAssets,
                 onAssetSelected = { viewModel.selectAsset(it) },
-                onStartScanning = { viewModel.resetScanState() },
+                onStartScanning = { viewModel.startManualAssetRegistration() },
                 onAddSite = { viewModel.showAddSite() },
                 onBack = {
                     if (state.fromSiteList) viewModel.showSiteList()
@@ -394,14 +397,18 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                 viewModel.loadInspectionsForAsset(state.asset.id)
                 viewModel.loadScanEventsForAsset(state.asset.id)
                 viewModel.loadBirthingTagEvent(state.asset.id)
+                viewModel.loadServiceRequestsForAsset(state.asset.id)
             }
             AssetDetailScreen(
                 asset = state.asset,
                 inspections = inspections,
                 scanEvents = scanEvents,
                 birthingTagEvent = birthingTagEvent,
+                serviceRequests = serviceRequests,
                 siteName = currentSite?.name ?: "",
                 source = assetDetailSource,
+                onRequestInspection = { viewModel.showServiceRequestForm(state.asset) },
+                onViewServiceRequestTrail = { viewModel.showServiceRequestTrail(state.asset) },
                 onStartInspection = { viewModel.startInspection(state.asset) },
                 onStartReplacement = { reason -> viewModel.startReplacementFlow(state.asset, reason) },
                 onShareReport = { inspection -> viewModel.shareReport(inspection, state.asset) },
@@ -475,7 +482,7 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                     quickRegisterIsManual = false
                     showQuickRegister = true
                 },
-                onRegisterAsInspector = { viewModel.resetScanState() },
+                onRegisterAsInspector = { viewModel.showAssetNotFound() },
                 onDismiss = { viewModel.resetScanState() }
             )
             if (showQuickRegister && activeVisitSiteId != null) {
@@ -637,6 +644,27 @@ fun EmberScanScreen(viewModel: EmberViewModel) {
                     }
                 }
             }
+        }
+
+        is EmberViewModel.ScanState.ServiceRequestForm -> {
+            ServiceRequestScreen(
+                asset = state.asset,
+                onSend = { name, phone, email, notes ->
+                    viewModel.sendServiceRequest(state.asset, name, phone, email, notes)
+                },
+                onCancel = { viewModel.selectAsset(state.asset) }
+            )
+        }
+
+        is EmberViewModel.ScanState.ServiceRequestTrail -> {
+            LaunchedEffect(state.asset.id) {
+                viewModel.loadServiceRequestsForAsset(state.asset.id)
+            }
+            ServiceRequestTrailScreen(
+                asset = state.asset,
+                serviceRequests = serviceRequests,
+                onBack = { viewModel.selectAsset(state.asset) }
+            )
         }
     }
 }
