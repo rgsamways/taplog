@@ -112,48 +112,16 @@ fun InspectionFormScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // Pre-inspection checklist (sourced from VerticalConfig)
+            // Pre-inspection checklist (Module 32 — interactive ChecklistCard)
             val assetTypeEntry = remember(asset.assetType) {
                 config.assetTypeRegistry.find { it.code == asset.assetType }
             }
             val checklistItems = assetTypeEntry?.checklistItems ?: emptyList()
             if (checklistItems.isNotEmpty()) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            "Inspection Checklist",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            assetTypeEntry?.label ?: asset.assetType,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        checklistItems.forEachIndexed { index, item ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    "${index + 1}.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(24.dp)
-                                )
-                                Text(
-                                    item,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                }
+                ChecklistCard(
+                    assetTypeLabel = assetTypeEntry?.label ?: asset.assetType,
+                    checklistItems = checklistItems
+                )
             }
 
             // Verified inspector identity (read-only)

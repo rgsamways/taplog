@@ -706,7 +706,12 @@ class EmberViewModel(
             val nextDue = inspection.inspectedAt + (intervalMonths * 30 * 24 * 60 * 60 * 1000)
             repository.updateAssetInspectionDates(asset.id, inspection.inspectedAt, nextDue)
 
-            _scanState.value = ScanState.AssetFound(asset)
+            _scanState.value = ScanState.AssetFound(
+                asset.copy(
+                    lastInspectedAt = inspection.inspectedAt,
+                    nextInspectionDue = nextDue
+                )
+            )
         }
     }
 
